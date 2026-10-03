@@ -272,7 +272,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 		if attributeName == "Frozen" or attributeName == "Shielded" or attributeName == "Rooted" or 
 			attributeName == "Stunned" or attributeName == "Ragdolled" then
 			local attrValue = Character:GetAttribute(attributeName)
-			if attrValue and attrValue > 0 then
+			if attrValue == true or (typeof(attrValue) == "number" and attrValue > 0) then
 				GuiRelatedThings.ErrorMessage(Player, `Status effect {attributeName} detected, canceling weave`)
 				CleanUp()
 			end

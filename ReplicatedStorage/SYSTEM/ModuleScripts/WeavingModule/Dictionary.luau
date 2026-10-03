@@ -173,7 +173,7 @@ local Dictionary = {
 	LightningStrike = {
 		WeaveKey = "12400",
 		DebounceDuration = 5, -- DB_DURATION
-		Damage = 40, -- DAMAGE
+		Damage = 20, -- DAMAGE
 		Area = 15,
 		CastRange = 100, -- CAST_RANGE
 		SourceCost = 15, -- SOURCE COST
@@ -185,7 +185,8 @@ local Dictionary = {
 		Interval = 1, -- SHOULD BE 0 IF CHARGING IS FALSE
 		Controls = false, -- IF TRUE THEN ADJUST SLOW PERCENTAGE
 		SlowPercentage = 0, -- SHOULD BE 0 IF CONTROLS IS FALSE
-		Image = Assets:WaitForChild("TelekineticCrash").Image
+		Image = Assets:WaitForChild("TelekineticCrash").Image,
+		RagdollDuration = 2,
 	},
 }
 
