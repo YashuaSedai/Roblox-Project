@@ -45,6 +45,7 @@ local WeavingFxEvent = ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("Mo
 local WeavingFxClear = ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("WeavingFxClear")
 local InversingRemote = ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("InversingRemote")
 local ChargeEvent = ReplicatedStorage:WaitForChild("ElementalMixing"):WaitForChild("Charging"):WaitForChild("Charge")
+local AnimationSignal = ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("AnimationHandler"):WaitForChild("AnimationSignal")
 
 -- PLAYER STATS
 local leaderstats = Player:WaitForChild("leaderstats")
@@ -166,7 +167,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 	end
 
 	-- Deduct the source
-	local Sourced, SourceDepleted = WeavingModule.InitiateSourceDeduction(Humanoid, WeaveData.SourceCost, WeaveData.Charging, WeaveData.Interval, WeaveData.MaxCharge)
+	local Sourced, SourceDepleted = WeavingModule.InitiateSourceDeduction(Humanoid, WeaveData.SourceCost, WeaveData.Charging, WeaveData.Interval, WeaveData.MaxCharge, WeaveData.ServerPaid)
 
 	if Sourced == false then 
 		GuiRelatedThings.ErrorMessage(Player, "You do not have enough Source") 
@@ -187,10 +188,16 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 
 	-- Play the Channeling animation which is a loop that comes after Channel
 	AnimationHandler.PlayWeaveAnimation(Character, WeaveName, "Channeling", false)
+	
+	local pressedAt = os.clock()
 
 	-- Cleanup function
 	local function CleanUp()
 		if WeaveName == nil then return end
+		
+		if WeaveData.RequiresReady and os.clock() - pressedAt < WeaveData.ReadyTime then
+			GuiRelatedThings.ErrorMessage(Player, `{WeaveName} wasn't ready yet`)
+		end
 		
 		-- Find Target 
 		local MouseTarget

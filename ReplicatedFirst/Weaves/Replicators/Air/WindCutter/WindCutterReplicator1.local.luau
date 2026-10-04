@@ -1,59 +1,62 @@
--- ReplicatedFirst > Weaves > Replicators > Air > AirPulse > AirPulseReplicator   (LocalScript)
+-- ReplicatedFirst > Weaves > Replicators > Air > WindCutter > WindCutterReplicator   (LocalScript)
 -- Replaces the whole old file.
 --
--- VISUALS ONLY. No damage, no knockback, no DebuffHandler, no Touched. The server says where the
--- projectile is ("Launch" / "Redirect") and where it ended ("Impact"). The held projectile is still
--- created by AirPulseEffect; at "Launch" we take it over and fly it.
+-- VISUALS ONLY. No damage, no DebuffHandler, no Touched. The server says where the blade is
+-- ("Launch" / "Redirect"), when it cut someone ("Hit") and when it ended ("Impact").
+-- The held blade is still created by WindCutterEffect; at "Launch" we take it over and fly it.
 
 -- SERVICES
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
--- MODULES
-local Modules = ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts")
-local Effects = require(Modules:WaitForChild("EffectsHandler"):WaitForChild("VFX"))
-
 -- REMOTE
-local ProjectileEvent = Modules:WaitForChild("WeavingModule"):WaitForChild("ProjectileEvent")
+local ProjectileEvent = ReplicatedStorage:WaitForChild("SYSTEM")
+	:WaitForChild("ModuleScripts")
+	:WaitForChild("WeavingModule")
+	:WaitForChild("ProjectileEvent")
 
--- ASSETS
-local SFX = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Weaves"):WaitForChild("SFX")
+local WEAVE = "WindCutter"
+local HIT_SOUNDS = { "sword enemy hit", "sword_hit_hi_armor_hi_dmg_1" } -- children of the blade part
+local SPIN_SPEED = math.rad(600)                -- radians per second (the old script did 10 degrees per frame at 60 fps)
+local TILT = CFrame.Angles(0, 0, math.rad(90))  -- lays the blade flat, same as the old script
 
-local WEAVE = "AirPulse"
-local SPIN_SPEED = math.rad(1200) -- radians per second (the old script did 20 degrees per frame at 60 fps)
-local SHAKE_RANGE = 100           -- studs: players farther than this feel no shake
-local LINGER = 1.5                -- seconds the impact effect stays before it is removed
+local flights = {} -- [id] = { blade, folder, connection, origin, direction, speed, serverTime, lifetime, spin }
 
-local LocalPlayer = Players.LocalPlayer
-local flights = {} -- [id] = { projectile, folder, connection, origin, direction, speed, serverTime, lifetime, spin }
-
--- finds the held projectile that AirPulseEffect made for this caster
+-- finds the held blade that WindCutterEffect made for this caster
 local function getHeld(ownerUserId)
 	local owner = Players:GetPlayerByUserId(ownerUserId)
 	local char = owner and owner.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	local folder = hum and hum:FindFirstChild("AirPulseProjectile")
-	local projectile = folder and folder:FindFirstChild("AirPulseEffect")
-	return folder, projectile
+	local folder = hum and hum:FindFirstChild("WindCutterProjectile")
+	local blade = folder and folder:FindFirstChild("WindCutterEffect")
+	return folder, blade
 end
 
--- LAUNCH: take over the held projectile and fly it along the server's line
+local function destroyFlight(id)
+	local flight = flights[id]
+	if not flight then return end
+	flights[id] = nil
+	if flight.connection then flight.connection:Disconnect() end
+	if flight.folder then flight.folder:Destroy() end
+end
+
+-- LAUNCH: take over the held blade and fly it along the server's line
 local function onLaunch(id, ownerUserId, origin, direction, speed, lifetime, serverTime)
-	local folder, projectile = getHeld(ownerUserId)
-	if not projectile then return end -- no held projectile (joined mid-cast): nothing to show
+	local folder, blade = getHeld(ownerUserId)
+	if not blade then return end -- no held blade (joined mid-cast): nothing to show
 
 	folder.Parent = workspace
 
-	-- the constraints held it at the hand; we move it ourselves now
-	local alignPosition = projectile:FindFirstChildOfClass("AlignPosition")
+	-- the constraints held the blade at the hand; we move it ourselves now
+	local alignPosition = blade:FindFirstChildOfClass("AlignPosition")
 	if alignPosition then alignPosition:Destroy() end
-	local alignOrientation = projectile:FindFirstChildOfClass("AlignOrientation")
+	local alignOrientation = blade:FindFirstChildOfClass("AlignOrientation")
 	if alignOrientation then alignOrientation:Destroy() end
-	projectile.Anchored = true
+	blade.Anchored = true
 
 	local flight = {
-		projectile = projectile,
+		blade = blade,
 		folder = folder,
 		origin = origin,
 		direction = direction,
@@ -67,21 +70,18 @@ local function onLaunch(id, ownerUserId, origin, direction, speed, lifetime, ser
 	flight.connection = RunService.RenderStepped:Connect(function(dt)
 		local t = workspace:GetServerTimeNow() - flight.serverTime
 		if t > flight.lifetime + 2 then
-			-- failsafe: the server's Impact never arrived
-			flight.connection:Disconnect()
-			flights[id] = nil
-			folder:Destroy()
+			destroyFlight(id) -- failsafe: the server's Impact never arrived
 			return
 		end
 		t = math.clamp(t, 0, flight.lifetime)
 
-		flight.spin += SPIN_SPEED * dt
+		flight.spin -= SPIN_SPEED * dt
 		local position = flight.origin + flight.direction * flight.speed * t
-		projectile:PivotTo(CFrame.new(position) * CFrame.Angles(0, 0, flight.spin))
+		blade:PivotTo(CFrame.new(position) * TILT * CFrame.Angles(flight.spin, 0, 0))
 	end)
 end
 
--- REDIRECT: the server bounced it (barrier); continue from its new line
+-- REDIRECT: the server bounced the blade (barrier); continue from its new line
 local function onRedirect(id, position, direction, speed, serverTime, lifetimeLeft)
 	local flight = flights[id]
 	if not flight then return end
@@ -92,44 +92,20 @@ local function onRedirect(id, position, direction, speed, serverTime, lifetimeLe
 	flight.lifetime = lifetimeLeft
 end
 
--- IMPACT: the server decided where it ended; we only play the show
-local function onImpact(id, position, _target)
+-- HIT: the server says the blade cut someone; play a random hit sound
+local function onHit(id)
 	local flight = flights[id]
 	if not flight then return end
-	flights[id] = nil
-	flight.connection:Disconnect() -- stops the flight and the spin
 
-	local projectile, folder = flight.projectile, flight.folder
-	projectile:PivotTo(CFrame.new(position)) -- end exactly where the server says
-
-	-- burst of particles
-	local effect = projectile:FindFirstChild("Effect")
-	if effect then
-		for _, emitter in effect:GetChildren() do
-			if emitter:IsA("ParticleEmitter") then
-				emitter:Emit(5)
-			end
-		end
+	local sound = flight.blade:FindFirstChild(HIT_SOUNDS[math.random(#HIT_SOUNDS)])
+	if sound then
+		local clone = sound:Clone()
+		clone.Parent = flight.blade
+		clone:Play()
+		clone.Ended:Once(function()
+			clone:Destroy()
+		end)
 	end
-
-	-- poof sound
-	local poof = SFX["Smoke_Teleport_Poof_4"]:Clone()
-	poof.Parent = projectile
-	poof:Play()
-
-	-- camera shake: only within range, stronger the closer you are
-	local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-	if localRoot then
-		local distance = (localRoot.Position - position).Magnitude
-		if distance <= SHAKE_RANGE then
-			local strength = (1 - distance / SHAKE_RANGE) ^ 2
-			Effects.ShakeCamera(LocalPlayer.UserId, true, nil, 3.5 * strength, 2, 0.5, 0.5)
-		end
-	end
-
-	task.delay(LINGER, function()
-		if folder then folder:Destroy() end
-	end)
 end
 
 -- FIZZLE: the cast was cancelled before launch (caster died or got ragdolled)
@@ -147,8 +123,10 @@ ProjectileEvent.OnClientEvent:Connect(function(kind, a, weaveName, ...)
 		onLaunch(a, ...)
 	elseif kind == "Redirect" then
 		onRedirect(a, ...)
+	elseif kind == "Hit" then
+		onHit(a)
 	elseif kind == "Impact" then
-		onImpact(a, ...)
+		destroyFlight(a)
 	elseif kind == "Fizzle" then
 		onFizzle(a)
 	end
@@ -178,53 +156,53 @@ end)
 --local ScriptFx = {} 
 --local CleanFx = {}
 
---WeavingEvent.OnClientEvent:Connect(function(char: Model?, hum: Humanoid, humRP, weaveName, mousePos: Vector3, DAMAGE, LIFETIME, PROJECTILE_SPEED, charge, force)
+--WeavingEvent.OnClientEvent:Connect(function(char: Model?, hum: Humanoid, humRP, weaveName, mousePos: Vector3, DAMAGE, LIFETIME, PROJECTILE_SPEED)
 --	if not char then warn("Character not found") return end  
 --	if not hum then warn("Humanoid not found") return end  
 --	if not humRP then warn("HumanoidRootPart not found") return end  
 --	if not weaveName then warn("WeaveName is missing") return end  
 
---	if weaveName ~= "AirPulse" then return end
+--	if weaveName ~= "WindCutter" then return end
 
 --	local player = Players:GetPlayerFromCharacter(char)
 --	if not player then return end -- Safety check
-
+	
 --	local UserId = player.UserId
 --	local element = "Air"
-
+	
 --	-- Locate the projectile
---	local ProjFolder = hum:WaitForChild("AirPulseProjectile")
+--	local ProjFolder = hum:WaitForChild("WindCutterProjectile")
 --	if not ProjFolder then warn("ProjectileFolder cannot be found") return end
 --	ProjFolder.Parent = workspace
-
---	local Projectile = ProjFolder:WaitForChild("AirPulseEffect")
+	
+--	local Projectile = ProjFolder:WaitForChild("WindCutterEffect")
 --	if not Projectile then return warn("Projectile cannot be found in the folder") end
-
+	
 --	if not ScriptFx[UserId] then 
 --		ScriptFx[UserId] = {}
 --	end
-
+	
 --	-- Make it constantly spin
 --	local AlignOri = Projectile:FindFirstChildOfClass("AlignOrientation")
 --	local rotationAngle = 0
---	local tiltAngle = math.rad(0) -- Tilt to make it flat
+--	local tiltAngle = math.rad(90) -- Tilt to make it flat
 --	AlignOri.Enabled = true
 --	--AlignOri.CFrame = CFrame.new(Projectile.Position) * CFrame.Angles(0, 0, tiltAngle) -- Set tilt once
 --	ScriptFx[UserId].SpinConnection = RunService.Heartbeat:Connect(function()
 --		if AlignOri then
---			rotationAngle = rotationAngle + math.rad(20)
+--			rotationAngle = rotationAngle - math.rad(10)
 
 --			-- First tilt to make it flat, THEN spin along the Y-axis
 --			AlignOri.CFrame = CFrame.new(Projectile.Position) 
 --				* CFrame.Angles(0, 0, tiltAngle) -- Tilt first
---				* CFrame.Angles(0, 0, rotationAngle) -- Then spin along Z-axis
+--				* CFrame.Angles(rotationAngle, 0, 0) -- Then spin along Y-axis
 --		end
 --	end)
 
-
+	
 --	-- Remove AlignPosition to make it loose
 --	DebuffHandler.SetOwner(Projectile, player.Name)
-
+	
 --	-- Setup Cleanup
 --	local function Cleanup()
 
@@ -242,55 +220,34 @@ end)
 
 --		if ProjFolder then ProjFolder:Destroy() end
 --	end
-
+	
 --	-- Setup Damage Logic
 --	local function DamageLogic(boolean, target)
 --		-- Cancel the life counter
---		if boolean and ScriptFx[UserId] and ScriptFx[UserId].Task1 then
---			task.cancel(ScriptFx[UserId].Task1)
+--		if boolean then task.cancel(ScriptFx[UserId].Task1) end
+		
+--		-- Sound options
+--		local soundOptions = {
+--			"sword enemy hit",
+--			"sword_hit_hi_armor_hi_dmg_1"
+--		}
+
+--		-- Randomly pick a sound
+--		local randomSound = soundOptions[math.random(1, #soundOptions)]
+
+--		-- Clone, play, and remove after playing
+--		if Projectile:FindFirstChild(randomSound) then
+--			local soundClone = Projectile[randomSound]:Clone()
+--			soundClone.Parent = Projectile
+--			soundClone:Play()
+
+--			-- Destroy after it finishes playing
+--			soundClone.Ended:Connect(function()
+--				soundClone:Destroy()
+--			end)
 --		end
-
---		-- Anchor Projectile
---		Projectile.Anchored = true
---		Effects.NumberValueTweenObj(Projectile, "", "Transparency", 1, 1, 0, 20)
-
---		-- Stop spinning
---		if ScriptFx[UserId] then
---			if ScriptFx[UserId].SpinConnection then ScriptFx[UserId].SpinConnection:Disconnect() end
---		end
-
---		-- Emit hit Particles
---		local ParticleEmitters = Projectile.Effect
---		for _, effect in ParticleEmitters:GetChildren() do
---			if effect:IsA("ParticleEmitter") then
---				effect:Emit(5)
---			end
---		end
-
---		-- Create and Play sound effects
---		local Sfx1 = SFX["Smoke_Teleport_Poof_4"]:Clone()
---		Sfx1.Parent = Projectile
---		Sfx1:Play()
-
+		
 --		-- Shake Camera
---		for _, people in workspace:GetChildren() do
---			if people:FindFirstChild("Humanoid") then
---				local peoplePlayer = Players:GetPlayerFromCharacter(people)
---				if peoplePlayer then
---					local peopleRootPart = people:FindFirstChild("HumanoidRootPart")
---					local distance = (Projectile.Position - peopleRootPart.Position).Magnitude
---					if distance <= 100 then
---						Effects.ShakeCamera(peoplePlayer.UserId, true, nil, 3.5, 2, 0.5, 0.5)
---					end
---				end
---			end
---		end
-
---		-- If no valid target or humanoid, stop here
---		if not target or not target:FindFirstChild("Humanoid") then
---			task.delay(1.5, Cleanup) -- Still cleanup but after effects
---			return
---		end
 
 --		-- Enemy damage logic
 --		local EnemiesinRange = {}
@@ -299,18 +256,16 @@ end)
 --		-- Deal damage and handle status effects
 --		for _, Enemies in EnemiesinRange do
 --			local EnemyHumanoid = Enemies:FindFirstChild("Humanoid")
---			if EnemyHumanoid then
---				DebuffHandler.FireDamage(player, player.UserId, EnemyHumanoid, DAMAGE)
---				-- Knockback enemies
---				DebuffHandler.FireKnockback(player, workspace:FindFirstChild(Projectile:GetAttribute("Owner"), true):FindFirstChild("HumanoidRootPart"), Enemies, 1.75, 
---					math.clamp(force, 4000, 5000), 2.5, 5)
---			end
+--			DebuffHandler.FireDamage(player, player.UserId, EnemyHumanoid, DAMAGE)
 --		end
 
---		task.delay(1.5, Cleanup)
+--		task.delay(LIFETIME, function()
+--			-- Destroy projectile?
+--			Cleanup()
+--		end)
 --	end
-
---	local Debounce = false
+	
+--	local DebounceTable = {}
 
 --	if Projectile then
 --		ScriptFx[UserId].Connection = Projectile.Touched:Connect(function(hit)
@@ -321,15 +276,39 @@ end)
 --				local targetchar = hit.Parent
 
 --				-- Use target as key in the debounce table
---				if not Debounce then
---					Debounce = true
+--				if not DebounceTable[targetchar] then
+--					DebounceTable[targetchar] = true
 --					DamageLogic(true, targetchar)
+
+--					-- Reset debounce for this target after 0.4 seconds
+--					task.delay(0.4, function()
+--						DebounceTable[targetchar] = nil
+--					end)
 --				end
 
 --			elseif hit:IsDescendantOf(workspace.Barriers) then
---				if not Debounce then
---					Debounce = true
---					DamageLogic(true, nil)
+--				if not DebounceTable["Barrier"] then
+--					DebounceTable["Barrier"] = true
+--					task.delay(0.1, function()
+--						DebounceTable["Barrier"] = nil
+--					end)
+
+--					local VeilOfReflection = hit
+--					local BarrierHealth = VeilOfReflection:FindFirstChild("Health")
+
+--					-- Set new projectile owner
+--					DebuffHandler.SetOwner(Projectile, VeilOfReflection:GetAttribute("Owner"))
+
+--					-- Retrieve LinearVelocity of the projectile
+--					local LinearVelocity = Projectile:FindFirstChildOfClass("LinearVelocity")
+
+--					if LinearVelocity then 
+--						LinearVelocity.VectorVelocity = -LinearVelocity.VectorVelocity -- Flip direction
+--					end
+
+--					if BarrierHealth then 
+--						DebuffHandler.DeductBarrierHealth(BarrierHealth, DAMAGE) 
+--					end
 --				end
 --			end
 --		end)
@@ -350,14 +329,12 @@ end)
 
 --		if ScriptFx[UserId] and ScriptFx[UserId].Task1 then ScriptFx[UserId].Task1 = nil end
 --	end)
-
+	
 --	-- Add a delay using the animation Signal before proceeding the code
 --	ScriptFx[UserId].AnimationConnection = AnimationSignal.OnClientEvent:Connect(function(weaveName: string, phase: string, UserId)
---		if weaveName ~= "AirPulse" then return end
+--		if weaveName ~= "WindCutter" then return end
 --		if phase ~= "Cast" then return end
 --		if player.UserId ~= UserId then return end
-		
---		print(`Passed`)
 
 --		-- Unlock projectile and add velocity
 --		Projectile.Anchored = false
@@ -372,5 +349,5 @@ end)
 
 --		if ScriptFx[UserId] and ScriptFx[UserId].AnimationConnection then ScriptFx[UserId].AnimationConnection:Disconnect(); ScriptFx[UserId].AnimationConnection = nil end
 --	end)
-
+	
 --end)

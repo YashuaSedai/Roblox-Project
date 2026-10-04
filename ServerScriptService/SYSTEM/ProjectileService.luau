@@ -69,6 +69,19 @@ local function step(dt)
 		local result = workspace:Spherecast(p.position, p.radius, motion, p.params)
 
 		if result then
+			-- piercing: report the character, then keep flying through it
+			if p.pierce and p.onHit then
+				local model = result.Instance:FindFirstAncestorOfClass("Model")
+				if model and model:FindFirstChildOfClass("Humanoid") then
+					local ok, err = pcall(p.onHit, { id = p.id, position = result.Position, owner = p.owner, model = model })
+					if not ok then warn("[ProjectileService] onHit failed:", err) end
+					local filter = p.params.FilterDescendantsInstances
+					table.insert(filter, model)
+					p.params.FilterDescendantsInstances = filter -- never hit this character again
+					continue
+				end
+			end
+
 			local barriers = workspace:FindFirstChild("Barriers")
 			local reflected = false
 
@@ -140,6 +153,8 @@ function ProjectileService.Launch(spec)
 		params = makeParams(owner),
 		onImpact = spec.onImpact,
 		onBarrier = spec.onBarrier,
+		pierce = spec.pierce,
+		onHit = spec.onHit,
 	}
 	active[p.id] = p
 

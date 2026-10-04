@@ -293,7 +293,7 @@ function WeavingModule.Charge(char: Model, maxCharge: number, level: number)
 end
 
 -- INITIATE SOURCE DEDUCTION
-function WeavingModule.InitiateSourceDeduction(hum: Humanoid, amount: number, Charging: boolean, Interval: number?, max: number?)
+function WeavingModule.InitiateSourceDeduction(hum: Humanoid, amount: number, Charging: boolean, Interval: number?, max: number?, serverPaid: boolean?)
 	if not hum then warn("SourceDeduct failed, no humanoid found") return false end
 	if not amount then warn("SourceDeduct did not receive an amount") end
 
@@ -334,7 +334,9 @@ function WeavingModule.InitiateSourceDeduction(hum: Humanoid, amount: number, Ch
 	if Source.Value < amount then
 		return false -- return false if the caster's source is less than the amount
 	else
-		SourceDeduct:FireServer(hum, amount)
+		if not serverPaid then
+			SourceDeduct:FireServer(hum, amount)
+		end
 		return true
 	end
 end

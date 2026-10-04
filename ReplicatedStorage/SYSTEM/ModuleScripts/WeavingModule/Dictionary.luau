@@ -40,6 +40,9 @@ local Dictionary = {
 		Interval = 0.1, -- SHOULDBE 0 IF CHARGING IS FALSE
 		Controls = true, -- IF TRUE THEN ADJUST SLOW PERCENTAGE
 		SlowPercentage = 0.2, -- SHOULD BE 0 IF CONTROLS IS FALSE
+		RequiresReady = true, -- can't be released until the Channel animation's "Signal" marker has fired
+		ReadyTime = 1.5,
+		FizzleCooldown = 1,   -- cooldown after an early release
 		Image = Assets:WaitForChild("Frostbound").Image
 	},
 	
@@ -133,6 +136,7 @@ local Dictionary = {
 		Interval = 0, -- SHOULDBE 0 IF CHARGING IS FALSE
 		Controls = false, -- IF TRUE THEN ADJUST SLOW PERCENTAGE
 		SlowPercentage = 0, -- SHOULD BE 0 IF CONTROLS IS FALSE
+		ServerPaid = true,
 		Image = Assets:WaitForChild("WindCutter").Image
 	},
 	
