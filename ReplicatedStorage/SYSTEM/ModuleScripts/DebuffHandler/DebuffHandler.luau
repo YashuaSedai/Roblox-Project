@@ -5,37 +5,18 @@ local Players = game:GetService("Players")
 
 -- REMOTES
 local DebuffHandlerFolder = RS:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("DebuffHandler")
-local DoTRemote = DebuffHandlerFolder:WaitForChild("DoT")
-local DamageRemote = DebuffHandlerFolder:WaitForChild("Damage")
-local StunRemote = DebuffHandlerFolder:WaitForChild("Stun")
-local KnockbackRemote = DebuffHandlerFolder:WaitForChild("Knockback")
-local RootRemote = DebuffHandlerFolder:WaitForChild("Root")
-local FreezeRemote = DebuffHandlerFolder:WaitForChild("Freeze")
 local Ice = DebuffHandlerFolder:WaitForChild("DebuffVFX"):WaitForChild("Ice")
 local AnimationHandler = require(RS:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("AnimationHandler"):WaitForChild("AnimationHandler"))
 
 -- MODULES
 local Effects = require(RS:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("EffectsHandler"):WaitForChild("VFX"))
+local MovementService = require(RS:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("MovementService"))
 
 local DebuffHandler = {
 	FreezeVFX = {},
 	StunVFX = {},
 	RootVFX = {}
 }
-
--- FIRING DOT TO SERVER
-function DebuffHandler.FireDoT(player: Player, userId: number, targetHumanoid: Humanoid, damage: number, duration: number, perTick: number)
-	
-	if player == nil then warn("DoT did not receive a player, cannot fire to server") return end
-	if userId == nil then warn("DoT did not receive a userId, cannot fire to server") return end
-	if targetHumanoid == nil then warn("DoT did not receive a target humanoid, cannot fire to server") return end
-	if damage == nil then warn("DoT did not receive a damage value, cannot fire to server") return end
-	if duration == nil then warn("DoT did not receive a duration value, cannot fire to server") return end
-	if perTick == nil then warn("DoT did not receive a perTick value, cannot fire to server") return end
-	
-	DoTRemote:FireServer(userId, targetHumanoid, damage, duration, perTick)
-	
-end
 
 -- FUNCTION TO DEAL DAMAGE OVER TIME
 function DebuffHandler.DoT(player: Player, userId: number, targetHumanoid: Humanoid, damage: number, duration: number, perTick: number)
@@ -67,18 +48,6 @@ function DebuffHandler.DoT(player: Player, userId: number, targetHumanoid: Human
 	end
 end
 
--- FIRING DAMAGE TO SERVER
-function DebuffHandler.FireDamage(player: Player, userId: number, targetHumanoid: Humanoid, damage: number)
-
-	if player == nil then warn("Damage did not receive a player, cannot fire to server") return end
-	if userId == nil then warn("Damage did not receive a userId, cannot fire to server") return end
-	if targetHumanoid == nil then warn("Damage did not receive a target humanoid, cannot fire to server") return end
-	if damage == nil then warn("Damage did not receive a damage value, cannot fire to server") return end
-	
-	DamageRemote:FireServer(userId, targetHumanoid, damage)
-
-end
-
 -- FUNCTION TO DEAL DAMAGE ONCE
 function DebuffHandler.Damage(player: Player, userId: number, targetHumanoid:Humanoid, damage: number)
 	if player == nil then warn("Damage did not receive a player") return end
@@ -90,27 +59,6 @@ function DebuffHandler.Damage(player: Player, userId: number, targetHumanoid:Hum
 		targetHumanoid:TakeDamage(damage)
 		DebuffHandler.LastAttackerAndDamage(player, targetHumanoid, damage)
 	end
-end
-
--- FIRING STUN TO SERVER
-function DebuffHandler.FireStun(player: Player, userId: number, targetCharacter: Model?, duration: number)
-	if player == nil then warn("Stun did not receive a player, cannot fire to server") return end
-	if userId == nil then warn("Stun did not receive a userId, cannot fire to server") return end
-	if targetCharacter == nil then warn("Stun did not receive a target character, cannot fire to server") return end
-	if duration == nil then warn("Stun did not receive a damage value, cannot fire to server") return end
-	
-	StunRemote:FireServer(targetCharacter, duration)
-	
-end
-
--- FIRING KNOCKBACK TO SERVER
-function DebuffHandler.FireKnockback(player: Player, obj: Instance, targetCharacter: Model?, duration: number, forceValue: number, upwardForce: number, rotationvalue: number)
-	if player == nil then warn("Knockback did not receive a player, cannot fire to server") return end
-	if targetCharacter == nil then warn("Knockback did not receive a target character, cannot fire to server") return end
-	if duration == nil then warn("Knockback did not receive a damage value, cannot fire to server") return end
-
-	KnockbackRemote:FireServer(obj, targetCharacter, duration, forceValue, upwardForce, rotationvalue)
-
 end
 
 -- FUNCTION TO KNOCKBACK A PLAYER
@@ -357,17 +305,6 @@ function DebuffHandler.Stun(player: Player, targetCharacter: Model?, duration: n
 	
 end
 
--- FIRING FREEZE TO SERVER
-function DebuffHandler.FireFreeze(player: Player, userId: number, targetCharacter: Model?, duration: number)
-	if player == nil then warn("Freeze did not receive a player, cannot fire to server") return end
-	if userId == nil then warn("Freeze did not receive a userId, cannot fire to server") return end
-	if targetCharacter == nil then warn("Freeze did not receive a target character, cannot fire to server") return end
-	if duration == nil then warn("Freeze did not receive a duration number, cannot fire to server") return end
-
-	FreezeRemote:FireServer(targetCharacter, duration)
-
-end
-
 -- FUNCTION TO FREEZE A PLAYER
 function DebuffHandler.Freeze(player: Player, targetCharacter: Model?, duration: number)
 	if not player then warn("Freeze did not receive a player") return end
@@ -413,8 +350,7 @@ function DebuffHandler.Freeze(player: Player, targetCharacter: Model?, duration:
 	end
 
 	-- Disable movement
-	humanoid.WalkSpeed = 0
-	humanoid.JumpPower = 0
+	MovementService.Refresh(targetCharacter) -- WalkSpeed / Jump are written by MovementService only
 
 	-- Continuously update FrozenDuration and unfreeze when it reaches 0
 	task.spawn(function()
@@ -451,8 +387,7 @@ function DebuffHandler.Freeze(player: Player, targetCharacter: Model?, duration:
 			
 			-- Check status whether returning original walkspeed and jumppower is allowed
 			if DebuffHandler.CheckStatus(targetCharacter) then
-				humanoid.WalkSpeed = 16 -- Default WalkSpeed
-				humanoid.JumpPower = 50 -- Default JumpPower
+				MovementService.Refresh(targetCharacter)
 			end
 			
 			-- Clean up the ice
@@ -522,17 +457,6 @@ function DebuffHandler.FreezeVisual(targetCharacter: Model?, Name: string)
 	return newIce
 end
 
--- FIRING ROOT TO SERVER
-function DebuffHandler.FireRoot(player: Player, userId: number, targetCharacter: Model?, duration: number | boolean)
-	if player == nil then warn("Root did not receive a player, cannot fire to server") return end
-	if userId == nil then warn("Root did not receive a userId, cannot fire to server") return end
-	if targetCharacter == nil then warn("Root did not receive a target character, cannot fire to server") return end
-	if duration == nil then warn("Root did not receive a duration number or boolean value, cannot fire to server") return end
-	
-	RootRemote:FireServer(targetCharacter, duration)
-	
-end
-
 -- FUNCTION TO ROOT A PLAYER
 function DebuffHandler.Root(player: Player, targetCharacter: Model?, duration: number | boolean)
 	if not player then warn("Root did not receive a player") return end
@@ -567,8 +491,7 @@ function DebuffHandler.Root(player: Player, targetCharacter: Model?, duration: n
 		end
 
 		-- Disable movement
-		humanoid.WalkSpeed = 0
-		humanoid.JumpPower = 0
+		MovementService.Refresh(targetCharacter) -- WalkSpeed / Jump are written by MovementService only
 		
 		task.spawn(function()
 			while targetCharacter:GetAttribute("RootDuration") > 0 do
@@ -608,8 +531,7 @@ function DebuffHandler.Root(player: Player, targetCharacter: Model?, duration: n
 					targetCharacter:SetAttribute("Rooted", false)
 
 					if DebuffHandler.CheckStatus(targetCharacter) then
-						humanoid.WalkSpeed = 16 -- Default WalkSpeed
-						humanoid.JumpPower = 50 -- Default JumpPower
+						MovementService.Refresh(targetCharacter)
 					end
 
 				end
@@ -629,8 +551,7 @@ function DebuffHandler.Root(player: Player, targetCharacter: Model?, duration: n
 			end
 
 			-- Disable movement
-			humanoid.WalkSpeed = 0
-			humanoid.JumpPower = 0
+			MovementService.Refresh(targetCharacter) -- WalkSpeed / Jump are written by MovementService only
 			
 		elseif duration == false then
 			
@@ -669,8 +590,7 @@ function DebuffHandler.Root(player: Player, targetCharacter: Model?, duration: n
 					end
 
 					if DebuffHandler.CheckStatus(targetCharacter) then
-						humanoid.WalkSpeed = 16 -- Default WalkSpeed
-						humanoid.JumpPower = 50 -- Default JumpPower
+						MovementService.Refresh(targetCharacter)
 					end
 				end
 			end

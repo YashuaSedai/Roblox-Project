@@ -23,6 +23,7 @@ local SFX = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Weaves"):Wait
 local WEAVE = "Boulder"
 local SHAKE_RANGE = 100 -- studs: players farther than this feel no shake
 local LINGER = 7        -- seconds the landing effects stay before they are removed
+local BLEND_RATE = 14   -- how fast the boulder eases from where it was held onto the server's line (higher = snappier)
 
 local LocalPlayer = Players.LocalPlayer
 local flights = {} -- [id] = { boulder, folder, connection, origin, direction, speed, serverTime, lifetime, rotation, spin }
@@ -35,6 +36,25 @@ local function getHeld(ownerUserId)
 	local folder = hum and hum:FindFirstChild("BoulderProjectile")
 	local boulder = folder and folder:FindFirstChild("BoulderEffect") -- the Model
 	return folder, boulder
+end
+
+-- BoulderEffect holds the boulder with physics (unanchored + AlignPosition/AlignOrientation).
+-- Once we move it by hand with PivotTo those constraints fight us every frame, so strip them and
+-- turn the boulder into a pure visual: anchored, no collisions, no queries.
+local function makeVisualOnly(boulder)
+	local items = boulder:GetDescendants()
+	table.insert(items, boulder)
+	for _, item in items do
+		if item:IsA("AlignPosition") or item:IsA("AlignOrientation") or item:IsA("LinearVelocity")
+			or item:IsA("VectorForce") or item:IsA("BodyMover") then
+			item:Destroy()
+		elseif item:IsA("BasePart") then
+			item.Anchored = true
+			item.CanCollide = false
+			item.CanQuery = false
+			item.CanTouch = false
+		end
+	end
 end
 
 local function anchorAll(instance)
@@ -54,7 +74,14 @@ local function onLaunch(id, ownerUserId, origin, direction, speed, lifetime, ser
 	if not boulder then return end -- no held boulder (joined mid-cast): nothing to show
 
 	folder.Parent = workspace
-	boulder:SetAttribute("Held", false) -- tells BoulderEffect to stop moving it by hand
+	boulder:SetAttribute("Held", false)
+	makeVisualOnly(boulder)
+
+	-- the server's line starts somewhere slightly different from where the boulder is being held,
+	-- so remember the gap and ease it out instead of popping
+	local t0 = math.clamp(workspace:GetServerTimeNow() - serverTime, 0, lifetime)
+	local lineNow = origin + direction * speed * t0
+	local startOffset = boulder:GetPivot().Position - lineNow
 
 	local flight = {
 		boulder = boulder,
@@ -64,6 +91,7 @@ local function onLaunch(id, ownerUserId, origin, direction, speed, lifetime, ser
 		speed = speed,
 		serverTime = serverTime,
 		lifetime = lifetime,
+		offset = startOffset,
 		rotation = boulder:GetPivot().Rotation, -- keep tumbling from the way it was facing
 		spin = Vector3.new(
 			math.rad(math.random(-40, 40)),
@@ -85,7 +113,8 @@ local function onLaunch(id, ownerUserId, origin, direction, speed, lifetime, ser
 		t = math.clamp(t, 0, flight.lifetime)
 
 		flight.rotation *= CFrame.Angles(flight.spin.X * dt, flight.spin.Y * dt, flight.spin.Z * dt)
-		local position = flight.origin + flight.direction * flight.speed * t
+		flight.offset = flight.offset:Lerp(Vector3.zero, 1 - math.exp(-BLEND_RATE * dt))
+		local position = flight.origin + flight.direction * flight.speed * t + flight.offset
 		boulder:PivotTo(CFrame.new(position) * flight.rotation)
 	end)
 end
@@ -102,13 +131,21 @@ local function onRedirect(id, position, direction, speed, serverTime, lifetimeLe
 end
 
 -- IMPACT: the server decided where it landed; we only play the show
-local function onImpact(id, position, charge)
+-- server sends: "Impact", id, weave, position, targets, duration, charge  (same as Fireball)
+local function onImpact(id, position, _targets, _duration, charge)
 	local flight = flights[id]
 	if not flight then return end
 	flights[id] = nil
 	flight.connection:Disconnect()
 
+	charge = math.max(tonumber(charge) or 1, 1)
+
 	local boulder, folder = flight.boulder, flight.folder
+
+	-- schedule the cleanup first so an error further down can never leave the folder behind
+	task.delay(LINGER, function()
+		if folder then folder:Destroy() end
+	end)
 	boulder:PivotTo(CFrame.new(position)) -- end exactly where the server says
 
 	-- take the landing effects out of the boulder first, so hiding the boulder doesn't hide them
@@ -181,9 +218,6 @@ local function onImpact(id, position, charge)
 		end
 	end
 
-	task.delay(LINGER, function()
-		if folder then folder:Destroy() end
-	end)
 end
 
 -- FIZZLE: the cast was cancelled before launch (caster died, got ragdolled, or released too early)

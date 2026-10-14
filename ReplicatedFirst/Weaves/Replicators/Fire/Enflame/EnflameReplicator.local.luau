@@ -27,9 +27,9 @@ WeavingEvent.OnClientEvent:Connect(function(char: Model?, hum: Humanoid, humRP, 
 	if not hum then warn("Humanoid not found") return end  
 	if not humRP then warn("HumanoidRootPart not found") return end  
 	if not weaveName then warn("WeaveName is missing") return end  
+	if weaveName ~= "Enflame" then return end
 	if not target then warn("No Target found") return end
 
-	if weaveName ~= "Enflame" then return end
 
 	local player = Players:GetPlayerFromCharacter(char)
 	if not player then return end -- Safety check
@@ -49,34 +49,34 @@ WeavingEvent.OnClientEvent:Connect(function(char: Model?, hum: Humanoid, humRP, 
 	local Folder = Instance.new("Folder")
 	Folder.Name = "EnflameFx2"
 	Folder.Parent = targetHum
-	
+
 	-- Create a trail or create a custom trail. 
 	-- Create Locking Trail
 	local LockingTrail = Effects.CreateTrail2(element, Folder, false, nil, nil, nil, RightHand.CFrame)
 	LockingTrail.Anchored = true
 	LockingTrail.Parent = Folder
-	
+
 	-- Set attribute Locking to true
 	LockingTrail:SetAttribute("Locking", true)
 	-- Set attribute WeaveName to weaveName
-	
+
 	LockingTrail:SetAttribute("WeaveName", weaveName)
-	
+
 	-- Set a Tag
 	CollectionService:AddTag(LockingTrail, "Locking")
-	
+
 	-- Set trail position away from target character within 30 studs (Technically yes)
-	
+
 	-- Create tween info and goal
 	local tweenInfo = TweenInfo.new(2, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
-	
+
 	-- Setup Bezier Points
 	local Base = RightHand.Position
 	local Point1 = Base
 	local Point2 = Base + Vector3.new(math.random(-20, 10), math.random(-10, 10), math.random(0, 10))
 	local Point3 = Base + Vector3.new(math.random(10, 20), math.random(0, 10), math.random(0, 10))
 	local Point4 = targetRP.Position
-	
+
 	-- Set them up in a table
 	local PointsTable = {
 		Point1 = Point1,
@@ -84,27 +84,27 @@ WeavingEvent.OnClientEvent:Connect(function(char: Model?, hum: Humanoid, humRP, 
 		Point3 = Point3,
 		Point4 = Point4
 	}
-	
+
 	-- Create Bezier
 	local NewBezier = BezierModule.new(Point1, Point2, Point3, Point4)
 
 	-- Tween trail position towards target position
 	local Tween = NewBezier:CreateCFrameTween(LockingTrail, {"CFrame"}, tweenInfo)
-	
+
 	-- Acquire Target character's attribute LockedWeave then set it to the taget's name + weave name
 	target:SetAttribute("LockedWeave" .. weaveName, (target:GetAttribute("LockedWeave" .. weaveName) or 0) + 1)
-	
+
 	-- Play the tween
 	Tween:Play()
-	
+
 	-- Set up a listener for when LockedWeave attribute changes to Zero, if Zero then proceed to clean up code immediately
 	local flag = false
 	EnflameFx[uniqueId].LockedWeaveListener = target:GetAttributeChangedSignal("LockedWeave" .. weaveName):Connect(function()
 		if target:GetAttribute("LockedWeave" .. weaveName) == 0 then
-			
+
 			-- Set Flag
 			flag = true
-			
+
 			task.delay(1, function()
 				-- Cancel Tween
 				Tween:Cancel()
@@ -112,29 +112,29 @@ WeavingEvent.OnClientEvent:Connect(function(char: Model?, hum: Humanoid, humRP, 
 				-- Anchor Trail
 				LockingTrail.Anchored = true
 			end)
-			
+
 			-- Clean any previous code
 			Effects.NumberValueTweenObj(LockingTrail, "Trail", "Transparency", 0, 1, 1, 10)
 			task.wait(2)
 			if not EnflameFx[uniqueId] then return end
-			
+
 			if Folder then Folder:Destroy() end
 			if EnflameFx[uniqueId].LockedWeaveListener then EnflameFx[uniqueId].LockedWeaveListener:Disconnect(); EnflameFx[uniqueId].LockedWeaveListener = nil end
-			
+
 			return -- Cancel the code
 		end
 	end)
-	
+
 	Tween.Completed:Wait()
 	if flag then warn("Flag is true, canceling script") return end
-	
+
 	-- If Tween manages to finish without the LockedWeave attribute changing, immediately disconnect the listener and subtract the LockedWeave
 	if EnflameFx[uniqueId].LockedWeaveListener then EnflameFx[uniqueId].LockedWeaveListener:Disconnect(); EnflameFx[uniqueId].LockedWeaveListener = nil end
 	if target:GetAttribute("LockedWeave"..weaveName) ~= 0 then
 		target:SetAttribute("LockedWeave" .. weaveName, (target:GetAttribute("LockedWeave" .. weaveName)) - 1)
 	end
-	
-	
+
+
 	-- Proceed code normally with damage, effects, and regular cleanup
 	-- Create effects
 	local Rotator = Effects.CreatePart(Vector3.new(1,1,1), 1, "EnflameRotator", targetRP.CFrame, Folder, true)
@@ -181,7 +181,7 @@ WeavingEvent.OnClientEvent:Connect(function(char: Model?, hum: Humanoid, humRP, 
 		Rotator.CFrame = CFrame.new(newPosition) * newRotation
 	end)
 
-	DebuffHandler.FireDoT(player, player.UserId, targetHum, DAMAGE_OVER_TIME, DURATION, 0.1)
+	-- (the SERVER applies the burn damage itself; this script only draws the fire)
 
 	--**CLEANUP HANDLER**
 	local function cleanup()

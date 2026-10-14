@@ -13,6 +13,7 @@ local Hotbar = StarterGui:WaitForChild("Inventory"):WaitForChild("Hotbar")
 local Design = StarterGui:WaitForChild("Inventory"):WaitForChild("Design")
 local Healthbar = StarterGui:WaitForChild("DisplayBar"):WaitForChild("Frame"):WaitForChild("Health")
 local Sourcebar = StarterGui:WaitForChild("DisplayBar"):WaitForChild("Frame"):WaitForChild("Source")
+local BurnOutbar = StarterGui:WaitForChild("DisplayBar"):WaitForChild("Frame"):WaitForChild("Burn")
 local WeaveDebounce = StarterGui:WaitForChild("WeaveDebounces"):WaitForChild("Main")
 
 -- MODULES
@@ -29,6 +30,8 @@ local HEALTH_OG_POS = Healthbar.Position
 local HEALTH_GOAL_POS = UDim2.new(HEALTH_OG_POS.X.Scale, 0, HEALTH_OG_POS.Y.Scale + Y_POS, 0)
 local SOURCE_OG_POS = Sourcebar.Position
 local SOURCE_GOAL_POS = UDim2.new(SOURCE_OG_POS.X.Scale, 0, SOURCE_OG_POS.Y.Scale + Y_POS, 0)
+local BURN_OG_POS = BurnOutbar.Position
+local BURN_GOAL_POS = UDim2.new(BURN_OG_POS.X.Scale, 0, BURN_OG_POS.Y.Scale + Y_POS, 0)
 local WEAVEDEBOUNCE_OG_POS = WeaveDebounce.Position
 local WEAVEDEBOUNCE_GOAL_POS = UDim2.new(WEAVEDEBOUNCE_OG_POS.X.Scale, 0, WEAVEDEBOUNCE_OG_POS.Y.Scale + Y_POS, 0)
 
@@ -65,6 +68,7 @@ function GuiRelatedThings.HotbarTweenPosition (player: Player, bool: boolean)
 	local Design = PlayerGui:WaitForChild("Inventory"):WaitForChild("Design")
 	local Healthbar = PlayerGui:WaitForChild("DisplayBar"):WaitForChild("Frame"):WaitForChild("Health")
 	local Sourcebar = PlayerGui:WaitForChild("DisplayBar"):WaitForChild("Frame"):WaitForChild("Source")
+	local BurnOutbar = PlayerGui:WaitForChild("DisplayBar"):WaitForChild("Frame"):WaitForChild("Burn")
 	local WeaveDebounce = PlayerGui:WaitForChild("WeaveDebounces"):WaitForChild("Main")
 
 	-- Bool refers to if player is weaving: Refer to ElementalSetting script and ElementalHandler
@@ -73,12 +77,14 @@ function GuiRelatedThings.HotbarTweenPosition (player: Player, bool: boolean)
 		GuiRelatedThings.TweenIn(Design, DESIGN_OG_POS)
 		GuiRelatedThings.TweenIn(Healthbar, HEALTH_OG_POS)
 		GuiRelatedThings.TweenIn(Sourcebar, SOURCE_OG_POS)
+		GuiRelatedThings.TweenIn(BurnOutbar, BURN_OG_POS)
 		GuiRelatedThings.TweenIn(WeaveDebounce, WEAVEDEBOUNCE_OG_POS)
 	elseif bool == false then
 		GuiRelatedThings.TweenOut(Hotbar, HOTBAR_GOAL_POS)
 		GuiRelatedThings.TweenIn(Design, DESIGN_GOAL_POS)
 		GuiRelatedThings.TweenIn(Healthbar, HEALTH_GOAL_POS)
 		GuiRelatedThings.TweenIn(Sourcebar, SOURCE_GOAL_POS)
+		GuiRelatedThings.TweenOut(BurnOutbar, BURN_GOAL_POS)
 		GuiRelatedThings.TweenIn(WeaveDebounce, WEAVEDEBOUNCE_GOAL_POS)
 	end
 end

@@ -29,6 +29,7 @@ local Janitor = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("M
 local AnimationHandler = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("AnimationHandler"):WaitForChild("AnimationHandler"))
 local Utilities = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("UTILITIES"))
 local Dictionary = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("Dictionary"))
+local MovementService = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("MovementService"))
 
 local DebounceHandler = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("DebounceHandler"):WaitForChild("Debounces"))
 --=========================================== MAIN REQUIREMENTS ===========================================
@@ -119,6 +120,13 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 	inputDebounce = true
 	task.delay(0.5, function() inputDebounce = false end)
 	
+	-- A Frozen / Shielded / Rooted / Stunned / Ragdolled player can't cast. Checked BEFORE Start so the drawn slots aren't wasted.
+	-- (the server enforces the same rule in WeavingModule.DeductSource, this is just the instant feedback)
+	if not MovementService.CanCast(Character) then
+		GuiRelatedThings.ErrorMessage(Player, "You can't cast right now")
+		return
+	end
+	
 	-- Acquire the Name of the Weave
 	local WeaveName = WeavingModule.Start(Player, Animations)
 	if WeaveName == nil then return warn("There is no WeaveName specified") end
@@ -154,17 +162,9 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 		return
 	end
 	
-	-- Checks for Controls
-	local Control = WeaveData.Controls
-	local Slow = WeaveData.SlowPercentage
-	local CapturedWalkSpeed = Humanoid.WalkSpeed
-	if Control == false then
-		Controls:Disable()
-	elseif Control == true then
-		-- TODO: and note: You are going to slow down the walkspeed of the character by a certain percentage
-		CapturedWalkSpeed = CapturedWalkSpeed * WeaveData.SlowPercentage -- recalculate captured walkspeed
-		Humanoid.WalkSpeed = CapturedWalkSpeed
-	end
+	-- MOVEMENT WHILE CASTING (Dictionary: Controls / SlowPercentage) is applied by the SERVER (MovementServer + MovementService),
+	-- not here. The old client code disabled the controls / slowed WalkSpeed BEFORE the Source check, so "not enough Source"
+	-- returned early and left the player unable to move (bug 8), and its clean up wrote WalkSpeed = 16 even while shielded (bug 6).
 
 	-- Deduct the source
 	local Sourced, SourceDepleted = WeavingModule.InitiateSourceDeduction(Humanoid, WeaveData.SourceCost, WeaveData.Charging, WeaveData.Interval, WeaveData.MaxCharge, WeaveData.ServerPaid)
@@ -175,7 +175,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 	end
 
 	-- Start Charging which may be useful for weaves that requires charging
-	ChargeEvent:FireServer(WeaveData.Charging, WeaveData.MaxCharge, Level.Value)
+	ChargeEvent:FireServer(WeaveData.Charging, WeaveData.MaxCharge, Level.Value, WeaveName)
 
 	-- Begin creating the effects
 	WeavingFxEvent:FireServer(WeaveName, MousePos, Level.Value)
@@ -192,8 +192,10 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 	local pressedAt = os.clock()
 
 	-- Cleanup function
+	local cleaned = false
 	local function CleanUp()
-		if WeaveName == nil then return end
+		if WeaveName == nil or cleaned then return end -- SourceDepleted, a status effect and the key release can all land together
+		cleaned = true
 		
 		if WeaveData.RequiresReady and os.clock() - pressedAt < WeaveData.ReadyTime then
 			GuiRelatedThings.ErrorMessage(Player, `{WeaveName} wasn't ready yet`)
@@ -228,19 +230,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 		-- Play the cast animation of the weave
 		AnimationHandler.PlayWeaveAnimation(Character, WeaveName, "Cast", false)
 		
-		-- Reenable Controls
-		if Control == false then
-			Controls:Enable()
-		elseif Control == true then
-			-- TODO: and note: Now this is the important part, maybe in the future you might add things that slows down another player, you need to add that check here.
-			-- if the Humanoid WalkSpeed, upon checking, became lower than the captured walkspeed, then don't revert the speed to normal, else if the Humanoid WalkSpeed is equal or greater than
-			-- the captured walkspeed then set the WalkSpeed to normal
-			if math.abs(Humanoid.WalkSpeed - CapturedWalkSpeed) < 0.01 then
-				Humanoid.WalkSpeed = 16
-			else
-				warn(`Unable to set WalkSpeed back to normal. CapturedWalkSpeed: {CapturedWalkSpeed}; HumanoidWalkSpeed: {Humanoid.WalkSpeed}`)
-			end
-		end
+		-- (movement is given back by the server when it sees the weave end: WeavingFxClear / WeavingEvent above)
 
 		-- Put Weave back to Cooldown
 		if not isOnCooldown then
@@ -252,6 +242,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 		if InputEndedConnection then InputEndedConnection:Disconnect(); InputEndedConnection = nil end
 		if SourceDepletionConnection then SourceDepletionConnection:Disconnect(); SourceDepletionConnection = nil end
 		if StatusEffectConnection then StatusEffectConnection:Disconnect(); StatusEffectConnection = nil end
+		if DeathConnection then DeathConnection:Disconnect(); DeathConnection = nil end
 		
 	end
 
@@ -286,8 +277,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 		end
 	end)
 	
-	-- TODO: Add a checker if player gets a certain status effect to prevent them from casting i.e. Global CD, Frozen, Shielded, Stunned
-	-- TODO: Add listeners for when the humanoid dies, gets shielded, gets frozen, gets stunned, etc. to clear up the effects and instant weaves
+	-- (the "can't cast while Frozen / Shielded / Stunned" check is at the top of this handler and on the server in WeavingModule.DeductSource)
 end)
 
 

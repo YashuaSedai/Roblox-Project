@@ -11,6 +11,8 @@ UpdateVisibility.OnServerEvent:Connect(function(player)
 	local hum: Humanoid = char and char:WaitForChild("Humanoid")
 	local head = char and char:WaitForChild("Head")
 	
+	if not head or head:FindFirstChild(StatsFolder.Name) then return end
+	
 	local newStats = StatsFolder:Clone()
 	newStats.Parent = head
 	

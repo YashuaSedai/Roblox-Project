@@ -48,6 +48,12 @@ local AnimationHandler = {
 	LightningStrikeChannel = {id = "81775683812526", track = nil},
 	LightningStrikeChanneling = {id = "103693699346080", track = nil},
 	LightningStrikeCast = {id = "78375617301995", track = nil},
+	
+	ShieldingChannel = {id = "96115051666014", track = nil},
+	ShieldingChanneling = {id = "83680842576629", track = nil},
+	
+	ShieldedChannel = {id = "111444984416257", track = nil},
+	ShieldedChanneling = {id = "128002216783485", track = nil},
 }
 
 

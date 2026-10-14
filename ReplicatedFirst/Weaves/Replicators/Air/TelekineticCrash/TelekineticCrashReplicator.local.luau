@@ -15,6 +15,7 @@ local AnimationHandler = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitFo
 -- REMOTE
 local WeavingInstantEvent = ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("WeavingInstantEvent")
 local WeavingInstantReleaseEvent = ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("WeavingInstantReleaseEvent")
+local WeavingEvent = ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("WeavingEvent")
 local AnimationSignal = ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("AnimationHandler"):WaitForChild("AnimationSignal")
 
 -- SOUNDS
@@ -39,79 +40,71 @@ WeavingInstantEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName, 
 
 	-- Define enemy target
 	local Enemy = mouseTarget
-	local EnemyHum = Enemy and Enemy:FindFirstChild("Humanoid")
 	local EnemyRP = Enemy and Enemy:FindFirstChild("HumanoidRootPart")
+	if not Enemy or not EnemyRP then ScriptFx[userId] = nil return end
 	local EnemyPlayer = Players:GetPlayerFromCharacter(Enemy) or nil
-	
+
 	-- Shake Cameras
 	if EnemyPlayer then Effects.ShakeCamera(EnemyPlayer.UserId, false, nil, 0.4, 3, 5) end
-	
-	-- Stun Target immediately
-	DebuffHandler.FireStun(player, userId, Enemy, true)
-	
+
+	-- (the server lifts and ragdolls the target itself; this script only draws it)
+
 	-- Create Folder for Effects
 	local Folder = Instance.new("Folder")
 	Folder.Name = "TelekineticCrashReplicator"
 	Folder.Parent = hum
-	
+
 	-- Create and Play sound effects
 	local Sfx1 = SFX["Generic Body Ragdoll Impact Sound 4"]:Clone()
 	Sfx1.Parent = Folder
 	local Sfx2 = SFX["Whoosh Burst 1 (SFX)"]:Clone()
 	Sfx2.Parent = Folder
-	
+
 	-- Create new Effects
 	local LevitatorEffect = EffectsFolder:WaitForChild("TelekineticCrashLevitatorEffect"):Clone()
 	LevitatorEffect.Parent = Folder
 	LevitatorEffect.CFrame = EnemyRP.CFrame + Vector3.new(0, -3, 0)
-	
-	-- Setup Animation Listener
-	ScriptFx[userId].AnimationConnection = AnimationSignal.OnClientEvent:Connect(function(weaveName, phase, UserId)
-		if weaveName ~= "TelekineticCrash" then return end
-		if UserId ~= userId then return end
-		if phase ~= "Cast" then return end
-		
-		-- Simulate Knockback
-		DebuffHandler.FireKnockback(player, humRP, Enemy, 1.75, math.clamp(force, 8000, 9000), 2.5, 5)
-		
-		-- Remove the previous ragdoll
-		DebuffHandler.FireStun(player, userId, Enemy, false)
-		
-		-- Damage
-		DebuffHandler.FireDamage(player, player.UserId, EnemyHum, DAMAGE)
+
+	-- The strike. The SERVER decides when it lands (after the wind-up) and applies damage / knockback itself.
+	-- All this does is play the impact.
+	ScriptFx[userId].HitConnection = WeavingEvent.OnClientEvent:Connect(function(hitChar, _hum, _root, hitWeave)
+		if hitWeave ~= "TelekineticCrash" then return end
+		if hitChar ~= char then return end
 
 		-- Shake Camera for target
 		if EnemyPlayer then Effects.ShakeCamera(EnemyPlayer.UserId, true, nil, 6.5, 7, 0.25, 0.25) end
-		
+
 		-- Turn Off emitters
 		for _, emitters in Folder:GetDescendants() do
 			if emitters:IsA("ParticleEmitter") then emitters.Enabled = false end
 		end
 	end)
-	
+
 	ScriptFx[userId].ClearConnection = WeavingInstantReleaseEvent.OnClientEvent:Connect(function(UserId, weaveName)
 		if weaveName ~= "TelekineticCrash" then return end
 		if UserId ~= userId then return end
 
 		if ScriptFx[UserId] then
-			
+
 			-- Play SFX
 			Sfx1:Play()
 			Sfx2:Play()
-			
+
 			-- Stop Camera Shake
 			if EnemyPlayer then Effects.StopShake(EnemyPlayer.UserId) end
-			
+
+			local fx = ScriptFx[userId]
+			ScriptFx[userId] = nil -- free the slot now so a quick re-cast starts clean
+
 			task.wait(2)
 			Folder:Destroy()
-			
-			ScriptFx[userId].AnimationConnection:Disconnect()
-			ScriptFx[userId].ClearConnection:Disconnect()
-			ScriptFx[userId] = nil
+
+			if fx.HitConnection then fx.HitConnection:Disconnect() end
+			fx.ClearConnection:Disconnect()
 		end
 	end)
-	
-	
-	
+
+
+
 end)
-	
+

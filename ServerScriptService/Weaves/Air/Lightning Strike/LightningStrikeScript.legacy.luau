@@ -9,6 +9,7 @@ local DebounceHandler = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitFor
 local GuiRelatedThings = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("GUI"):WaitForChild("GuiRelatedThings"))
 local Dictionary = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("Dictionary"))
 local RagdollService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("RagdollService"))
+local MovementService = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("MovementService"))
 
 -- REMOTES
 local WeavingEvent = ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("WeavingEvent")
@@ -21,6 +22,8 @@ local cooldownUntil = {}
 local castCounters = {}
 
 local WEAVE = "LightningStrike"
+
+local DEFAULT_MAX_HOLD = 30 -- seconds a charging weave can be held before it collapses; or set MaxHold in the Dictionary
 
 local function getLevel(player)
 	local stats = player:FindFirstChild("leaderstats")
@@ -38,6 +41,7 @@ local function cancelCast(player, char)
 	char:SetAttribute("Charging", false)
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	if hum then hum:SetAttribute("Charge", 0) end
+	MovementService.ClearSource(char, "Cast") -- the cast's slow / lock ends with the cast
 
 	WeavingFxClear:FireAllClients(player.UserId, WEAVE, true) -- true = "cancelled", so clients end the visuals now
 end
@@ -57,8 +61,17 @@ WeavingEvent.OnServerEvent:Connect(function(player: Player, weaveName, _charge, 
 	local humRP = char and char:FindFirstChild("HumanoidRootPart")
 	if not char or char ~= session.char or not hum or not humRP or hum.Health <= 0 then return end
 	if typeof(mousePos) ~= "Vector3" then return end
-	
-	if RagdollService.IsRagdolled(char) then return end
+
+	if (RagdollService.IsRagdolled(char) or not MovementService.CanCast(char)) then return end
+
+	-- Out of Source while holding: the channel could not be held, so the strike does NOT fire.
+	if WeavingModule.CannotAffordTick(hum, weaveData, session.lastPaid, WeavingModule.ChargeInterval(session.level)) then
+		cooldownUntil[player] = os.clock() + weaveData.DebounceDuration
+		char:SetAttribute("Charging", false)
+		hum:SetAttribute("Charge", 0)
+		WeavingFxClear:FireAllClients(player.UserId, WEAVE, true) -- true = cancelled, clients end the visuals now
+		return
+	end
 
 	cooldownUntil[player] = os.clock() + weaveData.DebounceDuration
 
@@ -66,7 +79,7 @@ WeavingEvent.OnServerEvent:Connect(function(player: Player, weaveName, _charge, 
 	local level = session.level
 	local charge = math.clamp(session.charge, 1, weaveData.MaxCharge)
 	local castRange = weaveData.CastRange + (level * charge / 10)
-	local damage = weaveData.Damage + (level * charge) / 100   -- your formula (+0.05 at level 1, check that's intended)
+	local damage = weaveData.Damage + ((level * charge) / 10)   -- your formula (+0.05 at level 1, check that's intended)
 	local area = weaveData.Area
 
 	-- clamp the strike point to max range
@@ -75,7 +88,7 @@ WeavingEvent.OnServerEvent:Connect(function(player: Player, weaveName, _charge, 
 	if offset.Magnitude > castRange then
 		mousePos = humRP.Position + offset.Unit * castRange
 	end
-	
+
 	-- raycast to the ground
 	local rayOrigin = mousePos
 	local rayDirection = Vector3.new(0, -1000, 0)
@@ -116,12 +129,12 @@ WeavingFxEvent.OnServerEvent:Connect(function(player: Player, weaveName, mousePo
 	local hum: Humanoid = char and char:FindFirstChild("Humanoid")
 	local humRP = char and char:FindFirstChild("HumanoidRootPart")
 	if not char or not hum or not humRP then return warn("Cannot find Char or Hum") end
-	if RagdollService.IsRagdolled(char) then return end
+	if (RagdollService.IsRagdolled(char) or not MovementService.CanCast(char)) then return end
 
 	-- Retrieve the required data from the dictionary
 	local weaveData = Dictionary[weaveName]
 	if not weaveData then return warn("Weave data not found for " .. weaveName) end
-	
+
 	local old = sessions[player]
 
 	if old and old.char == char and os.clock() - old.startedAt < 30 then
@@ -131,41 +144,47 @@ WeavingFxEvent.OnServerEvent:Connect(function(player: Player, weaveName, mousePo
 	if os.clock() < (cooldownUntil[player] or 0) then
 		return
 	end
-	
+
 	if not WeavingModule.DeductSource(player, hum, weaveData.SourceCost) then
 		return
 	end
-	
+
 	castCounters[player] = (castCounters[player] or 0) + 1
 	local castId = castCounters[player]
-	
+
 	local session = {
 		startedAt = os.clock(),
 		level = getLevel(player),
 		char = char,
 		charge = 0,          -- what the player has actually paid for
+		lastPaid = os.clock(), -- when the last payment was made
 	}
 
 	sessions[player] = session
-	
+
 	local chargeInterval = WeavingModule.ChargeInterval(session.level)
 
+	-- keep paying for as long as E is HELD. The charge stops at MaxCharge, but holding at max still costs Source (and Burn).
+	-- Out of Source (or a status effect blocking the cast, or held too long) = the strike collapses and does NOT fire.
 	task.spawn(function()
-		while sessions[player] == session and hum.Health > 0 and session.charge < weaveData.MaxCharge do
+		local maxHold = weaveData.MaxHold or DEFAULT_MAX_HOLD
+		while sessions[player] == session and hum.Health > 0 do
 			task.wait(chargeInterval)
 
 			if sessions[player] ~= session then
 				break
 			end
 
-			if not WeavingModule.DeductSource(player, hum, weaveData.SourceCost) then
+			if os.clock() - session.startedAt > maxHold or not WeavingModule.DeductSource(player, hum, weaveData.SourceCost) then
+				cancelCast(player, char)
 				break
 			end
 
-			session.charge += 1
+			session.lastPaid = os.clock()
+			session.charge = math.min(session.charge + 1, weaveData.MaxCharge)
 		end
 	end)
-	
+
 
 	-- Fire effects, effects are assessed via the weaveName
 	WeavingFxEvent:FireAllClients(char, hum, humRP, weaveName, castId)
@@ -193,3 +212,13 @@ RagdollService.Ragdolled:Connect(function(char)
 		cancelCast(player, char)
 	end
 end)
+
+-- ANY status effect that blocks casting (Frozen, Shielded, Stunned, Rooted...) cancels the cast the same way a ragdoll does
+if MovementService.CastBlocked then
+	MovementService.CastBlocked:Connect(function(char)
+		local player = Players:GetPlayerFromCharacter(char)
+		if player then
+			cancelCast(player, char)
+		end
+	end)
+end

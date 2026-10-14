@@ -16,6 +16,7 @@ local WeavingModule = require(WeavingFolder:WaitForChild("WeavingModule"))
 local Dictionary = require(WeavingFolder:WaitForChild("Dictionary"))
 local DebuffHandler = require(Modules:WaitForChild("DebuffHandler"):WaitForChild("DebuffHandler"))
 local RagdollService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("RagdollService"))
+local MovementService = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("MovementService"))
 local ProjectileService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("ProjectileService"))
 
 -- REMOTES
@@ -28,6 +29,7 @@ local AnimationSignal = Modules:WaitForChild("AnimationHandler"):WaitForChild("A
 local WEAVE = "Fireball"
 local KNOCKBACK_TIME = 1.75
 local DEFAULT_CAST_DELAY = 0.35 -- seconds between release and launch; tune to your Cast animation, or set CastDelay in the Dictionary
+local DEFAULT_MAX_HOLD = 30 -- seconds a charging weave can be held before it collapses; or set MaxHold in the Dictionary
 
 -- STATE THE SERVER OWNS (clients can't touch these)
 local sessions = {}      -- [player] = { startedAt, paidUntil, level, char }  while a cast is being channeled
@@ -59,6 +61,7 @@ local function cancelCast(player, char)
 	char:SetAttribute("Charging", false)
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	if hum then hum:SetAttribute("Charge", 0) end
+	MovementService.ClearSource(char, "Cast") -- the cast's slow / lock ends with the cast
 
 	WeavingFxClear:FireAllClients(player.UserId, WEAVE, true) -- true = cancelled
 	ProjectileEvent:FireAllClients("Fizzle", player.UserId, WEAVE) -- remove the held fireball
@@ -70,6 +73,16 @@ RagdollService.Ragdolled:Connect(function(char)
 		cancelCast(player, char)
 	end
 end)
+
+-- ANY status effect that blocks casting (Frozen, Shielded, Stunned, Rooted...) cancels the cast the same way a ragdoll does
+if MovementService.CastBlocked then
+	MovementService.CastBlocked:Connect(function(char)
+		local player = Players:GetPlayerFromCharacter(char)
+		if player then
+			cancelCast(player, char)
+		end
+	end)
+end
 
 -- THE EXPLOSION: the server finds the targets and applies everything
 local function explode(info, ctx)
@@ -151,7 +164,7 @@ WeavingFxEvent.OnServerEvent:Connect(function(player: Player, weaveName)
 
 	local char, hum, humRP = getAlive(player)
 	if not char then return end
-	if RagdollService.IsRagdolled(char) then return end
+	if (RagdollService.IsRagdolled(char) or not MovementService.CanCast(char)) then return end
 
 	local old = sessions[player]
 	if old and old.char == char and os.clock() - old.startedAt < 30 then return end -- already channeling
@@ -164,15 +177,20 @@ WeavingFxEvent.OnServerEvent:Connect(function(player: Player, weaveName)
 	local session = { startedAt = now, paidUntil = now, level = getLevel(player), char = char }
 	sessions[player] = session
 
-	-- keep paying Source while charging. Charge only counts for time that was actually paid for.
+	-- keep paying Source for as long as E is HELD. Charge only counts for time that was actually paid for and stops at MaxCharge,
+	-- but holding at max charge still costs Source every Interval (and so still raises Burn).
+	-- Out of Source (or a status effect blocking the cast, or held too long) = the weave collapses and does NOT fire.
 	local interval = weaveData.Interval
 	if weaveData.Charging and interval and interval > 0 then
-		local maxTime = weaveData.MaxCharge * WeavingModule.ChargeInterval(session.level)
+		local maxHold = weaveData.MaxHold or DEFAULT_MAX_HOLD
 		task.spawn(function()
-			while sessions[player] == session and hum.Health > 0 and os.clock() - session.startedAt < maxTime do
+			while sessions[player] == session and hum.Health > 0 do
 				task.wait(interval)
 				if sessions[player] ~= session then break end
-				if not WeavingModule.DeductSource(player, hum, weaveData.SourceCost) then break end
+				if os.clock() - session.startedAt > maxHold or not WeavingModule.DeductSource(player, hum, weaveData.SourceCost) then
+					cancelCast(player, char)
+					break
+				end
 				session.paidUntil = os.clock()
 			end
 		end)
@@ -192,10 +210,32 @@ WeavingEvent.OnServerEvent:Connect(function(player: Player, weaveName, _charge, 
 	local weaveData = Dictionary[WEAVE]
 	if not weaveData then return end
 
-	local char = getAlive(player)
-	if not char or char ~= session.char then return end
-	if RagdollService.IsRagdolled(char) then return end
-	if typeof(mousePos) ~= "Vector3" or not (mousePos.Magnitude < 1e5) then return end
+	-- The session is already gone at this point, so EVERY rejection below has to remove the held fireball on the clients.
+	-- Before, these three just returned: the held fireball was left floating in the air for good (bug 4).
+	local char, hum = getAlive(player)
+	if not char or char ~= session.char then
+		ProjectileEvent:FireAllClients("Fizzle", player.UserId, WEAVE)
+		return
+	end
+	if (RagdollService.IsRagdolled(char) or not MovementService.CanCast(char)) then
+		cooldownUntil[player] = os.clock() + weaveData.DebounceDuration
+		ProjectileEvent:FireAllClients("Fizzle", player.UserId, WEAVE)
+		return
+	end
+	if typeof(mousePos) ~= "Vector3" or not (mousePos.Magnitude < 1e5) then
+		ProjectileEvent:FireAllClients("Fizzle", player.UserId, WEAVE)
+		return
+	end
+
+	-- Out of Source while holding: the channel could not be held, so the weave does NOT fire.
+	-- (the pay loop normally cancels it first; this closes the gap before its next tick)
+	if hum and WeavingModule.CannotAffordTick(hum, weaveData, session.paidUntil) then
+		cooldownUntil[player] = os.clock() + weaveData.DebounceDuration
+		char:SetAttribute("Charging", false)
+		hum:SetAttribute("Charge", 0)
+		ProjectileEvent:FireAllClients("Fizzle", player.UserId, WEAVE)
+		return
+	end
 
 	cooldownUntil[player] = os.clock() + weaveData.DebounceDuration
 
@@ -222,7 +262,7 @@ WeavingEvent.OnServerEvent:Connect(function(player: Player, weaveName, _charge, 
 	-- the fireball leaves the hand after the cast wind-up
 	task.delay(weaveData.CastDelay or DEFAULT_CAST_DELAY, function()
 		local c, _, root = getAlive(player)
-		if not c or c ~= char or RagdollService.IsRagdolled(c) then
+		if not c or c ~= char or (RagdollService.IsRagdolled(c) or not MovementService.CanCast(c)) then
 			ProjectileEvent:FireAllClients("Fizzle", player.UserId, WEAVE) -- caster died or got ragdolled first
 			return
 		end
@@ -256,6 +296,9 @@ AnimationSignal.OnServerEvent:Connect(function(player: Player, weaveName, phase)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
+	if sessions[player] then
+		ProjectileEvent:FireAllClients("Fizzle", player.UserId, WEAVE) -- don't leave their held fireball behind
+	end
 	sessions[player] = nil
 	cooldownUntil[player] = nil
 end)

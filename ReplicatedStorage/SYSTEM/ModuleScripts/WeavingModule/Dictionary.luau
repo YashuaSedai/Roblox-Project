@@ -9,7 +9,7 @@ local Dictionary = {
 		WeaveKey = "10000",
 		InverseKey = "20000",
 		DebounceDuration = 2.5, -- DB_DURATION
-		DamageOverTime = 15, -- TOTAL DAMAGE OVER TIME
+		DamageOverTime = 20, -- TOTAL DAMAGE OVER TIME
 		Duration = 5, -- DURATION
 		CastRange = 30, -- CAST_RANGE
 		SourceCost = 10, -- SOURCE COST
@@ -21,18 +21,19 @@ local Dictionary = {
 		Interval = 0, -- SHOULD BE 0 IF CHARGING IS FALSE
 		Controls = true, -- IF TRUE THEN ADJUST SLOW PERCENTAGE
 		SlowPercentage = 0.9, -- SHOULD BE 0 IF CONTROLS IS FALSE
+		ServerPaid = true,
 		Image = Assets:WaitForChild("Enflame").Image
 	},
 	
 	Frostbound = {
 		WeaveKey = "22400",
 		DebounceDuration = 5, -- WEAVE COOLDOWN
-		Damage = 15,
+		Damage = 20,
 		Duration = 1, -- FREEZE DURATION
 		ProjectileSpeed = 100, -- PROJECTILE SPEED
 		Lifetime = 3, -- PROJECTILE LIFETIME
 		Area = 15,
-		SourceCost = 1,
+		SourceCost = 1.5,
 		RequiresTarget = false, -- REQUIRES A MOUSE TARGET?
 		Instant = false,
 		Charging = true, -- DOES THIS WEAVE CHARGE?
@@ -41,7 +42,7 @@ local Dictionary = {
 		Controls = true, -- IF TRUE THEN ADJUST SLOW PERCENTAGE
 		SlowPercentage = 0.2, -- SHOULD BE 0 IF CONTROLS IS FALSE
 		RequiresReady = true, -- can't be released until the Channel animation's "Signal" marker has fired
-		ReadyTime = 1.5,
+		ReadyTime = 2,
 		FizzleCooldown = 1,   -- cooldown after an early release
 		Image = Assets:WaitForChild("Frostbound").Image
 	},
@@ -49,10 +50,10 @@ local Dictionary = {
 	BrambleSnare = {
 		WeaveKey = "32300",
 		DebounceDuration = 10, -- WEAVE COOLDOWN
-		Damage = 2, -- THIS IS PER TICK
+		Damage = 3, -- THIS IS PER TICK
 		CastRange = 50, -- CAST_RANGE
 		Area = 15,
-		SourceCost = 1.2,
+		SourceCost = 1,
 		RequiresTarget = false, -- REQUIRES A MOUSE TARGET?
 		RequiresPosition = true, -- REQUIRES A MOUSE POSITION?
 		Instant = true,
@@ -61,6 +62,8 @@ local Dictionary = {
 		Interval = 0.1, -- SHOULDBE 0 IF CHARGING IS FALSE
 		Controls = false, -- IF TRUE THEN ADJUST SLOW PERCENTAGE
 		SlowPercentage = 0, -- SHOULD BE 0 IF CONTROLS IS FALSE
+		MaxHold = 60,
+		ReadyTime = 4,
 		Image = Assets:WaitForChild("BrambleSnare").Image
 	},
 	
@@ -72,7 +75,7 @@ local Dictionary = {
 		ProjectileSpeed = 70, -- PROJECTILE SPEED
 		Lifetime = 3, -- PROJECTILE LIFETIME
 		Area = 20,
-		SourceCost = 1.2,
+		SourceCost = 1.5,
 		RequiresTarget = false, -- REQUIRES A MOUSE TARGET?
 		Instant = false,
 		Charging = true, -- DOES THIS WEAVE CHARGE?
@@ -80,6 +83,9 @@ local Dictionary = {
 		Interval = 0.1, -- SHOULDBE 0 IF CHARGING IS FALSE
 		Controls = false, -- IF TRUE THEN ADJUST SLOW PERCENTAGE
 		SlowPercentage = 0, -- SHOULD BE 0 IF CONTROLS IS FALSE
+		RequiresReady = true, -- can't be released until the Channel animation's "Signal" marker has fired
+		ReadyTime = 1.67,
+		FizzleCooldown = 1,   -- cooldown after an early release
 		Image = Assets:WaitForChild("Boulder").Image
 	},
 	
@@ -89,7 +95,7 @@ local Dictionary = {
 		Health = 50,
 		MaxHealth = 200,
 		RegenRate = 0.1, -- PER SECOND ASSUMINGLY
-		SourceCost = 0,
+		SourceCost = 0.3,
 		RequiresTarget = false,
 		Charging = true,
 		MaxCharge = 0, -- CAN BE 0 IF WEAVE IS HELD BUT NOT NECESSARILY NEEDING A CHARGE
@@ -97,6 +103,9 @@ local Dictionary = {
 		Interval = 0.1,
 		Controls = true,
 		SlowPercentage = 0.3,
+		ReadyTime = 0.4,
+		MaxHold = 120,
+		FizzleCooldown = 1,
 		Image = Assets:WaitForChild("VeilOfReflection").Image
 	},
 	
@@ -109,7 +118,7 @@ local Dictionary = {
 		ProjectileSpeed = 200, -- PROJECTILE SPEED
 		Lifetime = 3, -- PROJECTILE LIFETIME
 		Area = 15,
-		SourceCost = 1,
+		SourceCost = 1.5,
 		RequiresTarget = false, -- REQUIRES A MOUSE TARGET?
 		Instant = false,
 		Charging = true, -- DOES THIS WEAVE CHARGE?
@@ -162,15 +171,18 @@ local Dictionary = {
 		DebounceDuration = 5, -- DB_DURATION
 		Damage = 25, -- DAMAGE
 		CastRange = 20, -- CAST_RANGE
-		SourceCost = 3, -- SOURCE COST
+		SourceCost = 50, -- SOURCE COST
 		RequiresTarget = true, -- REQUIRES A MOUSE TARGET?
 		RequiresPosition = false, -- REQUIRES A MOUSE POSITION?
 		Instant = true,
-		Charging = true, -- DOES THIS WEAVE CHARGE?
+		Charging = false, -- DOES THIS WEAVE CHARGE?
 		MaxCharge = 0, -- SHOULDBE 0 IF CHARGING IS FALSE
-		Interval = 1, -- SHOULD BE 0 IF CHARGING IS FALSE
+		Interval = 0, -- SHOULD BE 0 IF CHARGING IS FALSE
 		Controls = false, -- IF TRUE THEN ADJUST SLOW PERCENTAGE
 		SlowPercentage = 0, -- SHOULD BE 0 IF CONTROLS IS FALSE
+		MaxHold = 60,
+		CastDelay = 0,
+		ServerPaid = true,
 		Image = Assets:WaitForChild("TelekineticCrash").Image
 	},
 	
@@ -180,7 +192,7 @@ local Dictionary = {
 		Damage = 20, -- DAMAGE
 		Area = 15,
 		CastRange = 100, -- CAST_RANGE
-		SourceCost = 15, -- SOURCE COST
+		SourceCost = 12, -- SOURCE COST
 		RequiresTarget = false, -- REQUIRES A MOUSE TARGET?
 		RequiresPosition = true, -- REQUIRES A MOUSE POSITION?
 		Instant = false,
@@ -191,6 +203,24 @@ local Dictionary = {
 		SlowPercentage = 0, -- SHOULD BE 0 IF CONTROLS IS FALSE
 		Image = Assets:WaitForChild("TelekineticCrash").Image,
 		RagdollDuration = 2,
+	},
+	
+	Shielding = {
+		WeaveKey = "55500",
+		CastRange = 50,
+		DebounceDuration = 5,
+		SourceReduction = 0.5,
+		BurnMaximum = 20,
+		SourceCost = 0.1,
+		Interval = 0.1,
+		Instant = true,
+		Charging = true,
+		MaxCharge = 0,
+		RequiresTarget = true,
+		RequiresPosition = true,
+		Controls = true, -- (was "Contrls": a typo, so the 50% slow never applied)
+		SlowPercentage = 0.5,
+		Image = Assets:WaitForChild("TelekineticCrash").Image,
 	},
 }
 

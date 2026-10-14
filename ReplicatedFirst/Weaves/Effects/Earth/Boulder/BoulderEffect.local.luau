@@ -24,6 +24,11 @@ local BoulderProjectile = ReplicatedStorage:WaitForChild("Assets"):WaitForChild(
 local BoulderFx = {}
 local BoulderClean = {}
 
+-- TUNING
+local MAX_SCALE = 4     -- how many times bigger the boulder is at FULL charge (3 stud rock -> 12 studs). Change to taste.
+local MAX_CHARGE = 10   -- keep equal to Boulder.MaxCharge in the Dictionary
+local HOLD_HEIGHT = 15  -- studs above the caster. Keep equal to HELD_OFFSET in the server BoulderScript.
+
 WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 	if not char then warn("Character not found") return end  
 	if not hum then warn("Humanoid not found") return end  
@@ -31,7 +36,7 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 	if not weaveName then warn("WeaveName is missing") return end  
 
 	if weaveName ~= "Boulder" then return end
-	
+
 	local player = Players:GetPlayerFromCharacter(char)
 	local userId = player.UserId
 	local element = "Earth"
@@ -43,17 +48,17 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 	-- Required References
 	local RightHand = char:FindFirstChild("RightHand")
 	local LeftHand = char:FindFirstChild("LeftHand")
-	
+
 	-- Create Folder for Effects
 	local Folder = Instance.new("Folder")
 	Folder.Name = "BoulderFx"
 	Folder.Parent = hum
-	
+
 	-- Since we're doing a projectile, create a folder for the projectile for the Replicator script to use
 	local ProjFolder = Instance.new("Folder")
 	ProjFolder.Name = "BoulderProjectile"
 	ProjFolder.Parent = hum
-	
+
 	-- *SETTING UP SPECIAL EFFECTS HERE* --
 	local NumberSequence1 = NumberSequence.new(1.5)
 	local NumberSequence2 = NumberSequence.new(1.2)
@@ -66,7 +71,7 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 	local Rotator_1 = Effects.CreatePart(Vector3.new(1,1,1), 1, "LeftBoulderRotator", LeftHand.CFrame, Folder, false)
 	local Trail_0 = Effects.CreateTrail2(element, Folder, false, nil, true, Rotator_0, Rotator_0.CFrame * CFrame.new(0, 0, 1.5))
 	local Trail_1 = Effects.CreateTrail2(element, Folder, false, nil, true, Rotator_1, Rotator_1.CFrame * CFrame.new(0, 0, 1.5))
-	
+
 	-- Tween Effects here
 	local rotationAngle_0 = 0
 	local rotationAngle_1 = 0
@@ -83,7 +88,7 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 		Rotator_0.CFrame = RightHand.CFrame * newRotation_0
 		Rotator_1.CFrame = LeftHand.CFrame * newRotation_1
 	end)
-	
+
 	-- Create and Play sound effects
 	local Voodoo = SFX["voodoo_restoration"]:Clone(); Voodoo.Parent = Folder
 	local EarthquakeLoop = SFX["Loop Earthquake Sound"]:Clone(); EarthquakeLoop.Parent = Folder
@@ -92,18 +97,18 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 	Voodoo:Play()
 	EarthquakeLoop.Volume = 0; EffectsSFX.FadeSound(EarthquakeLoop, 0.5, 2, 20); EarthquakeLoop:Play()
 	RockSfx:Play()
-	
+
 	-- DECLARE VARIABLES FIRST
 	local Beam_0
 	local Beam_1
 	local Beam2_0
 	local Beam2_1
-	
+
 	BoulderFx[userId].AnimationConnection = AnimationSignal.OnClientEvent:Connect(function(weaveName: string, phase: string, UserId)
 		if weaveName ~= "Boulder" then return end
 		if phase ~= "Channel" then return end
 		if player.UserId ~= UserId then return end
-		
+
 		-- Create Beams
 		Beam_0 = Effects.CreateBeam("Earth", Folder, humRP.CFrame * CFrame.new(0,-5,-5), RightHand.CFrame, nil, RightHand, 5, 5, 2, 5, 3, 5)
 		Beam_1 = Effects.CreateBeam("Earth", Folder, humRP.CFrame * CFrame.new(0,-5,-5), LeftHand.CFrame, nil, LeftHand,  -5, -5, -2, -5, -3, -5)
@@ -128,13 +133,13 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 		-- Create more beams that will connect to the actual projectile
 		Beam2_0 = Effects.CreateBeam("Earth", Folder, humRP.CFrame * CFrame.new(-5,-5,0), humRP.CFrame * CFrame.new(0, 15, 0), nil, nil, 5, 5, 2, 5, 3, 5)
 		Beam2_1 = Effects.CreateBeam("Earth", Folder, humRP.CFrame * CFrame.new(5,-5,0), humRP.CFrame * CFrame.new(0, 15, 0), nil, nil,  -5, -5, -2, -5, -3, -5)
-		
+
 		-- Anchor start positions
 		Beam2_0.Start.Anchored = true
 		Beam2_1.Start.Anchored = true
 		Beam2_0.End.Anchored = true
 		Beam2_1.End.Anchored = true
-		
+
 		-- Fade transparency
 		for _, beams in Beam2_0:GetChildren() do
 			if beams:IsA("Beam") then
@@ -147,52 +152,85 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 				Effects.NumberValueTweenObj(beams, "Beam", "Transparency", 1, 2, 0.5, 20)
 			end
 		end
-		
+
 		-- */*/*/*/*/*/*/*/*/ PROJECTILE */*/*/*/*/*/*/*/*/*/*/*/
+		-- The held boulder is a pure visual (the server owns the real projectile), so it is NOT physics driven:
+		-- no AlignPosition, no unanchoring. We place it exactly above the caster and move it by hand every frame.
 		local newProjectile = BoulderProjectile:Clone()
-		newProjectile.AlignPosition.Position = (humRP.CFrame * CFrame.new(0, 15, 0)).Position
+
+		-- use the biggest visible part as the primary part, so the model's centre is the rock's centre
+		local primary, bestVolume = nil, -1
+		for _, d in newProjectile:GetDescendants() do
+			if d:IsA("BasePart") and d.Transparency < 1 then
+				local volume = d.Size.X * d.Size.Y * d.Size.Z
+				if volume > bestVolume then primary, bestVolume = d, volume end
+			end
+		end
+		primary = primary or newProjectile.PrimaryPart or newProjectile:FindFirstChildWhichIsA("BasePart", true)
+		if not primary then
+			warn("BoulderEffect model has no BasePart")
+			newProjectile:Destroy()
+			return
+		end
+		newProjectile.PrimaryPart = primary
+
+		for _, d in newProjectile:GetDescendants() do
+			if d:IsA("AlignPosition") or d:IsA("AlignOrientation") or d:IsA("LinearVelocity") or d:IsA("VectorForce") then
+				d:Destroy()
+			elseif d:IsA("BasePart") then
+				d.Anchored = true
+				d.CanCollide = false
+				d.CanTouch = false
+				d.CanQuery = false
+			end
+		end
+
+		-- place it on top of the caster BEFORE it becomes visible in the world, so it never flies in from somewhere
+		newProjectile:SetAttribute("Held", true) -- the Replicator sets this to false at launch and takes over
+		newProjectile:PivotTo(humRP.CFrame * CFrame.new(0, HOLD_HEIGHT, 0))
 		newProjectile.Parent = ProjFolder
-		newProjectile.CFrame = humRP.CFrame * CFrame.new(0, 15, 0)
-		
-		--task.wait() -- let the code yield
-		
-		newProjectile.Anchored = false
-		newProjectile:FindFirstChildOfClass("AlignPosition").Enabled = true
-		newProjectile:FindFirstChildOfClass("AlignOrientation").Enabled = true
-		-- Setup Projectile AlignPosition
-		BoulderFx[UserId].Task1 = task.spawn(function()
-			while newProjectile and newProjectile:FindFirstChildOfClass("AlignPosition") do
-				local BasePosition = humRP.CFrame * CFrame.new(0, 15, 0)
-				local localOffSet = Vector3.new(math.random(-0.5, 0.5), math.random(-0.5, 0.5), math.random(-0.5, 0.5))
-				newProjectile:FindFirstChildOfClass("AlignPosition").Position = Effects.ShakeAP(newProjectile.AlignPosition, BasePosition, localOffSet, 0.1)
+
+		-- hover above the caster and tumble, until the Replicator launches it (Held = false) or it gets destroyed
+		task.spawn(function()
+			local rotation = CFrame.Angles(math.rad(math.random(0, 360)), math.rad(math.random(0, 360)), math.rad(math.random(0, 360)))
+			local spin = Vector3.new(math.rad(math.random(-40, 40)), math.rad(math.random(-40, 40)), math.rad(math.random(-40, 40)))
+			while true do
+				local dt = RunService.RenderStepped:Wait()
+				if not newProjectile.Parent or newProjectile:GetAttribute("Held") == false or not humRP.Parent then break end
+				rotation *= CFrame.Angles(spin.X * dt, spin.Y * dt, spin.Z * dt)
+				local position = (humRP.CFrame * CFrame.new(0, HOLD_HEIGHT, 0)).Position
+				newProjectile:PivotTo(CFrame.new(position) * rotation)
 			end
 		end)
-		
-		-- Allow the Projectile to have randomized Rotation
-		BoulderFx[UserId].Task2 = task.spawn(function()
-			while newProjectile and newProjectile.Parent do
-				Effects.TwistOrientation(newProjectile)
-				task.wait(0.5)
-			end
-		end)
-		
+
 		Effects.ShakeCamera(userId, false, nil, 0.4, 3, 1)
 
-		-- Connect charge change event
+		-- Grow with charge (0 charge = normal size, full charge = MAX_SCALE). ScaleTo is absolute, so it can't compound.
+		local growToken = 0
 		if BoulderFx[userId] then
 			BoulderFx[userId].Connection2 = hum:GetAttributeChangedSignal("Charge"):Connect(function()
-				local newCharge = hum:GetAttribute("Charge")
-				local sizePercentage = 1 + (math.clamp(newCharge * 3.5, 0, 100) / 100) -- 1 charge = 3.5% increase
+				if not newProjectile.Parent or newProjectile:GetAttribute("Held") == false then return end -- already launched
+				local ratio = math.clamp((hum:GetAttribute("Charge") or 0) / MAX_CHARGE, 0, 1)
+				local target = 1 + (MAX_SCALE - 1) * ratio
+				local from = newProjectile:GetScale()
+				if target <= from then return end -- never shrink
 
-				-- Smoothly adjust size
-				Effects.GrowSize(newProjectile, sizePercentage, 20, 0.5)
+				growToken += 1
+				local token = growToken
+				task.spawn(function()
+					for i = 1, 10 do
+						if token ~= growToken or not newProjectile.Parent then return end
+						newProjectile:ScaleTo(from + (target - from) * (i / 10))
+						task.wait(0.05)
+					end
+				end)
 			end)
 		end
-		
+
 		-- Disconnect this whole connection
 		if BoulderFx[userId] and BoulderFx[userId].AnimationConnection then BoulderFx[userId].AnimationConnection:Disconnect(); BoulderFx[userId].AnimationConnection = nil end
 	end)
-	
+
 	BoulderFx[userId].ClearConnection = WeavingFxClear.OnClientEvent:Connect(function(UserId, weaveName)
 		if weaveName ~= "Boulder" then return end
 		if UserId ~= userId then return end
@@ -208,7 +246,7 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 
 				-- Begin Clean up here
 				BoulderClean[UserId].TempTask = task.spawn(function()
-					
+
 					-- STOPS CAMERA SHAKE
 					Effects.StopShake(UserId)
 
@@ -219,7 +257,7 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 					Particle_1.Anchored = true
 					Rotator_0.Anchored = true
 					Rotator_1.Anchored = true
-					
+
 					-- DESTROY WELDS 
 					local weld
 					weld = Trail_0:FindFirstChildOfClass("WeldConstraint"); if weld then weld:Destroy() end
@@ -242,7 +280,7 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 
 					Effects.NumberValueTween(Trail_0, "Trail", "Transparency", 0, 1, 1, 20)
 					Effects.NumberValueTween(Trail_1, "Trail", "Transparency", 0, 1, 1, 20)
-					
+
 					-- Stop Projectile from Moving
 					if BoulderClean[UserId] and BoulderClean[UserId].Task1 then
 						local status = coroutine.status(BoulderClean[UserId].Task1)
@@ -251,7 +289,7 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 						end
 						BoulderClean[UserId].Task1 = nil
 					end
-					
+
 					-- Stop Projectile from Rotating
 					if BoulderClean[UserId] and BoulderClean[UserId].Task2 then
 						local status = coroutine.status(BoulderClean[UserId].Task2)
@@ -260,9 +298,9 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 						end
 						BoulderClean[UserId].Task2 = nil
 					end
-					
+
 					local beamGroups = {Beam_0, Beam_1, Beam2_0, Beam2_1}
-					
+
 					-- Anchor and destroy weld constraint from beam points; Tween Transparency as well
 					for _, group in ipairs(beamGroups) do
 						for _, part in ipairs(group:GetChildren()) do
@@ -279,19 +317,19 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 							end
 						end
 					end
-					
+
 					-- FADE SOUND VOLUME
 					EffectsSFX.FadeSound(EarthquakeLoop, 0, 2, 20)
-					
+
 					-- PLAY LAST SOUND
 					local CastSound = SFX:FindFirstChild("black_flash"):Clone(); CastSound.Parent = Folder
 					CastSound:Play()
-					
+
 					task.wait(2)
-					
+
 					-- DESTROY EFFECTS FOLDER
 					Folder:Destroy()
-					
+
 					-- CLEAN UP CONNECTIONS AND TASKS
 					if BoulderClean[UserId] then
 						if BoulderClean[UserId].Connection then BoulderClean[UserId].Connection:Disconnect(); BoulderClean[UserId].Connection = nil end
@@ -301,11 +339,11 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 						if BoulderClean[UserId].Task2 and coroutine.status(BoulderClean[UserId].Task2) ~= "dead" then task.cancel(BoulderClean[UserId].Task2) end; BoulderClean[UserId].Task2 = nil
 						if BoulderClean[UserId].ClearConnection then BoulderClean[UserId].ClearConnection:Disconnect(); BoulderClean[UserId].ClearConnection = nil end
 						if BoulderClean[UserId].TempTask then BoulderClean[UserId].TempTask = nil end
-						
+
 						BoulderClean[UserId] = nil -- Clear the table
 					end
 				end)
-				
+
 			end
 		end
 	end)

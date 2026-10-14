@@ -42,6 +42,11 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 	if not FireballFx[userId] then 
 		FireballFx[userId] = {}
 	end
+
+	-- THIS cast's state. The "Channel" animation signal arrives some time AFTER the cast starts, and the clear can arrive
+	-- BEFORE it (the cast was cancelled almost at once: Source ran out, a status effect landed, a quick tap).
+	-- The old code then still built the held fireball after the clear and nobody ever removed it = the floating fireball (bug 4).
+	local state = { cleared = false }
 	
 	-- Required References
 	local RightHand = char:FindFirstChild("RightHand")
@@ -132,6 +137,7 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 		if weaveName ~= "Fireball" then return end
 		if phase ~= "Channel" then return end
 		if player.UserId ~= UserId then return end
+		if state.cleared then return end -- this cast was already cleared before the signal got here
 		
 		-- Create Beams
 		Beam_0 = Effects.CreateBeam(element, Folder, RightHand.CFrame, humRP.CFrame * CFrame.new(0, 1, -4), nil, nil, 12, 12, 12, 12, 12, 12)
@@ -172,6 +178,7 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 		Beam_1.End.AlignPosition.Position = (humRP.CFrame * CFrame.new(0, 1, -4)).Position
 
 		task.wait(0.1) -- let the code yield
+		if state.cleared then return end -- cleared while we were waiting: the clean up owns the beams, don't build the projectile
 
 		-- Enable AlignPosition and AlignOrientation
 		Beam_0.End.AlignPosition.Enabled = true
@@ -181,6 +188,11 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 		
 		-- */*/*/*/*/*/*/*/*/ PROJECTILE */*/*/*/*/*/*/*/*/*/*/*/
 		local newProjectile = FireballProjectile:Clone()
+		-- the held fireball is a visual only: nothing may touch it, collide with it or push the caster with it (bug 5)
+		newProjectile.CanTouch = false
+		newProjectile.CanCollide = false
+		newProjectile.CanQuery = false
+		newProjectile.Massless = true
 		newProjectile.AlignPosition.Position = (humRP.CFrame * CFrame.new(0, 1, -4)).Position
 		newProjectile.Parent = ProjFolder
 		newProjectile.CFrame = humRP.CFrame * CFrame.new(0, 1, -4)
@@ -193,6 +205,12 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 		Beam_1.End.WeldConstraint.Part1 = nil
 		
 		task.wait() -- let the code yield
+
+		-- cleared in that last yield: remove the projectile we just made (and never index a table the clear already took away)
+		if state.cleared or not FireballFx[UserId] then
+			newProjectile:Destroy()
+			return
+		end
 		
 		newProjectile.Anchored = false
 		newProjectile.AlignPosition.Enabled = true
@@ -245,6 +263,24 @@ WeavingFxEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName)
 	FireballFx[userId].ClearConnection = WeavingFxClear.OnClientEvent:Connect(function(UserId, weaveName)
 		if weaveName ~= "Fireball" then return end
 		if UserId ~= userId then return end
+
+		-- Each cast has its own handler, and the old one stays connected while it fades. Without this, the NEXT cast's clear also ran the
+		-- old handler, which took the new cast's effects away from the new handler and left them behind.
+		if state.cleared then return end
+		-- from this moment nothing of this cast may be built any more
+		state.cleared = true
+		if FireballFx[UserId] then
+			if FireballFx[UserId].AnimationConnection then FireballFx[UserId].AnimationConnection:Disconnect(); FireballFx[UserId].AnimationConnection = nil end
+			if FireballFx[UserId].Connection2 then FireballFx[UserId].Connection2:Disconnect(); FireballFx[UserId].Connection2 = nil end
+		end
+
+		-- FAILSAFE for the held fireball. On a normal release the replicator takes it over on "Launch" (about 0.35s later) and moves it out of
+		-- this folder; on a cancel it gets a "Fizzle". If neither ever comes it would hang in mid-air forever, so remove it here after a while.
+		task.delay(3, function()
+			if ProjFolder.Parent == hum then
+				ProjFolder:Destroy()
+			end
+		end)
 		
 		-- Move the cleanup task to the FireballClean table to process it separately
 		if FireballFx[UserId] then

@@ -9,6 +9,7 @@ local DrawHandler = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChil
 local DebounceHandler = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("DebounceHandler"):WaitForChild("Debounces"))
 local GuiRelatedThings = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("GUI"):WaitForChild("GuiRelatedThings"))
 local Dictionary = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("Dictionary"))
+local MovementService = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("MovementService"))
 
 -- REMOTES
 local ToggleDebounce = ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("Attributes"):WaitForChild("Debounces"):WaitForChild("ToggleDebounce")
@@ -29,24 +30,24 @@ WeavingModule.ElementList = {
 function WeavingModule.Start(player: Player, animationTable)
 	if player == nil then warn("No Player detected") return end
 	if animationTable == nil then warn("Animations Table is missing") end
-	
+
 	local char: Model? = player and player.Character
 	if not char then warn("No Character detected") return end
 	if char:GetAttribute("Slot1") == "Default" then GuiRelatedThings.ErrorMessage(player, "You haven't drawn any elements") return end
 
 	if DebounceHandler.DebounceCheck(player, char, "WeavingDB") then GuiRelatedThings.ErrorMessage(player, "You cannot cast another weave yet") return nil end
-	
-	ToggleDebounce:FireServer(char, "WeavingDB", 3)
-	
+
+	ToggleDebounce:FireServer(char, "WeavingDB", 1)
+
 	local TotalSlots: number = 0
 	local Prefix = "Slot"
-	
+
 	for i = 1, 5 do
 		local attrName = Prefix .. i
 		local Element = char:GetAttribute(attrName)
 
 		TotalSlots = TotalSlots + 1
-		
+
 		if Element then
 			-- Insert Element into corresponding slot
 			table.insert(WeavingModule.ElementList[attrName], Element)
@@ -55,9 +56,9 @@ function WeavingModule.Start(player: Player, animationTable)
 			table.insert(WeavingModule.ElementList[attrName], "Default")
 		end
 	end
-	
+
 	local WeaveName = WeavingModule.WeavingPrepare(WeavingModule.ElementList)
-	
+
 	if WeaveName == nil then
 		warn("No Weave Found for", WeaveName)
 		WeavingModule.WeavingReset(player, TotalSlots, animationTable)
@@ -65,7 +66,7 @@ function WeavingModule.Start(player: Player, animationTable)
 	end
 
 	WeavingModule.WeavingReset(player, TotalSlots, animationTable)
-	
+
 	return WeaveName
 end
 
@@ -73,9 +74,9 @@ end
 function WeavingModule.WeavingReset(player: Player, TotalSlots: number, animationTable)
 	-- Stop the Weaving animation
 	animationTable.Default.Track:Stop()
-	
+
 	RemoveEvent:FireServer(player)
-	
+
 	-- Clear all the Slots from the Attributes
 	ElementalHandler.AllSlotsDeleter(player, TotalSlots)
 
@@ -89,7 +90,7 @@ function WeavingModule.WeavingReset(player: Player, TotalSlots: number, animatio
 end
 
 function WeavingModule.WeavingPrepare(ElementList)
-	
+
 	-- Local variables for the slots
 	local Slot1, Slot2, Slot3, Slot4, Slot5
 
@@ -110,7 +111,7 @@ function WeavingModule.WeavingPrepare(ElementList)
 	end
 
 	local WeaveName = WeavingModule.WeaveIdentifer(Slot1, Slot2, Slot3, Slot4, Slot5)
-	
+
 	return WeaveName
 	-- Now you have Slot1 to Slot5 assigned, you can fire them to the server
 end
@@ -133,7 +134,7 @@ function WeavingModule.WeaveIdentifer(Slot1, Slot2, Slot3, Slot4, Slot5)
 	WeaveKey = WeaveKey .. (elementMap[Slot3] or "0")
 	WeaveKey = WeaveKey .. (elementMap[Slot4] or "0")
 	WeaveKey = WeaveKey .. (elementMap[Slot5] or "0")
-	
+
 	local WeaveName = WeavingModule.SearchDictionary(WeaveKey)
 
 	return WeaveName
@@ -261,7 +262,7 @@ end
 --function WeavingModule.Charge(char: Model, maxCharge: number, level: number)
 --	local hum = char and char:FindFirstChild("Humanoid")
 --	local Charge = 0
-	
+
 --	while char and char:GetAttribute("Charging") do
 --		if Charge < maxCharge then
 --			Charge = Charge + 1
@@ -277,12 +278,22 @@ function WeavingModule.ChargeInterval(level: number)
 	return math.max(0.1, 1 - (level * 0.005)) -- same formula as before, but can't hit 0
 end
 
-function WeavingModule.Charge(char: Model, maxCharge: number, level: number)
+function WeavingModule.Charge(char: Model, maxCharge: number, level: number, startDelay: number?, sourceCost: number?)
 	local hum = char and char:FindFirstChild("Humanoid")
 	local Charge = 0
 
+	if startDelay and startDelay > 0 then
+		task.wait(startDelay)
+	end
+
 	while char and hum and char:GetAttribute("Charging") do
 		if Charge < maxCharge then
+			-- out of Source: the channel can't be held any more, so the charge stops rising
+			if sourceCost and sourceCost > 0 then
+				local source = hum:FindFirstChild("Source")
+				if not source or source.Value < sourceCost then break end
+			end
+
 			Charge += 1
 			hum:SetAttribute("Charge", Charge)
 			task.wait(WeavingModule.ChargeInterval(level))
@@ -314,11 +325,8 @@ function WeavingModule.InitiateSourceDeduction(hum: Humanoid, amount: number, Ch
 					LastTick = CurrentTime
 					--SourceDeduct:FireServer(hum, amount)
 
-					local Charge = hum:GetAttribute("Charge")
-
-					if Charge and max ~= 0 and Charge >= max then
-						Connection:Disconnect()
-					end
+					-- (this used to stop watching once the charge was maxed. Holding at max charge still costs Source now,
+					--  so it keeps watching until the weave ends, and SourceDepleted can still fire.)
 				end
 
 			elseif hum and Source and Source.Value < amount then
@@ -334,9 +342,6 @@ function WeavingModule.InitiateSourceDeduction(hum: Humanoid, amount: number, Ch
 	if Source.Value < amount then
 		return false -- return false if the caster's source is less than the amount
 	else
-		if not serverPaid then
-			SourceDeduct:FireServer(hum, amount)
-		end
 		return true
 	end
 end
@@ -352,16 +357,41 @@ end
 function WeavingModule.DeductSource(player: Player, hum: Humanoid, amount: number)
 	local Source = hum and hum:FindFirstChild("Source")
 	if not Source then return false end
+
+	-- THE CAST GATE. Every weave pays through here, at the start of the cast AND every Interval of a channel, so this
+	-- one line means: a Frozen / Shielded / Rooted / Stunned / Ragdolled character can't START a weave, and a weave
+	-- they are channeling ends the moment one of those lands on them (the weave's own script sees "can't pay").
+	if not MovementService.CanCast(hum.Parent) then return false end
 	if Source.Value < amount then return false end
 	Source.Value -= amount
+
+	-- BURNOUT: spending Source fills the burn meter. BurnoutSetup (server) creates the meter and sets the rate.
+	-- Every weave pays through here, so every weave counts, including channeled ones that pay every 0.1s.
+	local burn = hum:FindFirstChild("Burn")
+	local perSource = burn and burn:GetAttribute("PerSource")
+	if perSource then
+		burn.Value += amount * perSource
+	end
+
 	return true
+end
+
+-- True when a channeled weave's next Source payment was already DUE and the caster can't make it.
+-- Used when the key is released: a weave that ran out of Source while being held must NOT fire.
+-- lastPaidAt = os.clock() of the last payment. interval defaults to the weave's Interval.
+function WeavingModule.CannotAffordTick(hum: Humanoid, weaveData, lastPaidAt: number, interval: number?)
+	if not weaveData or not weaveData.Charging then return false end
+	local source = hum and hum:FindFirstChild("Source")
+	if not source then return false end
+	interval = interval or weaveData.Interval or 0.1
+	return os.clock() - lastPaidAt >= interval and source.Value < (weaveData.SourceCost or 0)
 end
 
 -- CAST RANGE CHECKER
 function WeavingModule.CheckRange(CastRange, MousePosition, PartPosition)
 	-- Calculate the distance between the MousePosition and the PartPosition
 	local distance = (MousePosition - PartPosition).Magnitude
-	
+
 	-- Return true if the distance is within the CastRange, otherwise false
 	return distance <= CastRange
 end
@@ -376,7 +406,7 @@ function WeavingModule.DecodeInverseKey(InverseKey)
 		["4"] = "Air",
 		["5"] = "Spirit"
 	}
-	
+
 	local elementTable = {}
 
 	for i = 1, #InverseKey do

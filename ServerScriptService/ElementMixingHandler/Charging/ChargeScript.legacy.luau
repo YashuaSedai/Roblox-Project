@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- MODULE
 local WeavingModule = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("WeavingModule"))
+local Dictionary = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("Dictionary"))
 
 -- GENERIC
 local ChargeEvent = ReplicatedStorage:WaitForChild("ElementalMixing"):WaitForChild("Charging"):WaitForChild("Charge")
@@ -24,18 +25,20 @@ local ChargeEvent = ReplicatedStorage:WaitForChild("ElementalMixing"):WaitForChi
 	
 --end)
 
-ChargeEvent.OnServerEvent:Connect(function(player: Player, enable, max)
+
+ChargeEvent.OnServerEvent:Connect(function(player: Player, enable, _max, _level, weaveName)
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	if not char or not hum or hum.Health <= 0 then return end
 
 	if enable == true then
-		if char:GetAttribute("Charging") then return end -- don't stack loops
+		if char:GetAttribute("Charging") then return end
+		local weaveData = typeof(weaveName) == "string" and Dictionary[weaveName]
+		if not weaveData then return end -- unknown weave: refuse
 		local stats = player:FindFirstChild("leaderstats")
 		local lvl = stats and stats:FindFirstChild("Level")
-		max = typeof(max) == "number" and math.clamp(max, 0, 100) or 0 -- 100 = your highest MaxCharge
 		char:SetAttribute("Charging", true)
-		WeavingModule.Charge(char, max, lvl and lvl.Value or 1)
+		WeavingModule.Charge(char, weaveData.MaxCharge, lvl and lvl.Value or 1, weaveData.RequiresReady and weaveData.ReadyTime or 0, weaveData.SourceCost)
 	elseif enable == false then
 		char:SetAttribute("Charging", false)
 		hum:SetAttribute("Charge", 0)

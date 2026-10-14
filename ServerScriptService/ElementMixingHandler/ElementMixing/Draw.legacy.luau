@@ -12,22 +12,26 @@ local SourceDeduct = ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("Attr
 local Janitor = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("Janitor"))
 local WeavingModule = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("WeavingModule"))
 
-DrawEvent.OnServerEvent:Connect(function(plr: Player, element: string?, slot: string?, slotNo: number?)
-	local char = plr.Character
-	local name = plr.Name
-	
-	DrawEvent:FireAllClients(char, name, element, slot, slotNo)
+local ELEMENTS = { Fire = true, Water = true, Earth = true, Air = true, Spirit = true, Default = true }
+local SLOTS = { Slot1 = true, Slot2 = true, Slot3 = true, Slot4 = true, Slot5 = true }
+local lastDraw = {}
+
+DrawEvent.OnServerEvent:Connect(function(plr, element, slot, slotNo)
+	if typeof(element) ~= "string" or not ELEMENTS[element] then return end
+	if typeof(slot) ~= "string" or not SLOTS[slot] then return end
+	if slotNo ~= nil and (typeof(slotNo) ~= "number" or slotNo % 1 ~= 0 or slotNo < 1 or slotNo > 5) then return end
+
+	local now = os.clock()
+	if now - (lastDraw[plr] or 0) < 0.05 then return end -- at most about 20 a second
+	lastDraw[plr] = now
+
+	DrawEvent:FireAllClients(plr.Character, plr.Name, element, slot, slotNo)
 end)
 
 -- WHEN FX NEEDS CLEANING UP
 RemoveEvent.OnServerEvent:Connect(function(plr: Player)
 	RemoveEvent:FireAllClients(plr.Name)
 end)
-
--- DEDUCT SOURCE
---SourceDeduct.OnServerEvent:Connect(function(player: Player, hum: Humanoid, amount: number)
---	WeavingModule.DeductSource(player, hum, amount)
---end)
 
 local MAX_COST = 50
 

@@ -26,7 +26,7 @@ Weaver.OnServerEvent:Connect(function(player)
 				end
 			end
 
-			if HumanoidRootPart then
+			if HumanoidRootPart and not HumanoidRootPart:FindFirstChild(Sounds.Name) then
 				local newSounds = Sounds:Clone()
 				newSounds.Parent = HumanoidRootPart
 			end

@@ -2,6 +2,9 @@ local SFX = {}
 
 function SFX.FadeSound(sound, targetVolume, duration, steps)
 	if sound and sound:IsA("Sound") then
+		if not targetVolume then targetVolume = 0 end
+		if not duration then duration = 1 end
+		if not steps then steps = 60 end
 		task.spawn(function()
 			local interval = duration / steps
 			local initialVolume = sound.Volume

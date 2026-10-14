@@ -28,7 +28,7 @@ Players.PlayerAdded:Connect(function(player)
 		source.Value = maxSource.Value
 
 		-- Define the regeneration rate
-		local sourceRegen = 1 + ((multiplier/1000) * level.Value)
+		local sourceRegen = 1 + ((multiplier/25) * level.Value)
 
 		-- Function to clean up source-related logic
 		local function CleanupSource()
@@ -67,7 +67,7 @@ Players.PlayerAdded:Connect(function(player)
 						if source.Value < maxSource.Value and not char:GetAttribute("GlobalCD") 
 							and not char:GetAttribute("Shielded") 
 							and not char:GetAttribute("ShieldApplication") then
-							source.Value = math.min(source.Value + sourceRegen, maxSource.Value)
+							source.Value = math.min(source.Value + (sourceRegen/10), maxSource.Value)
 						end
 
 						task.wait(0.1)

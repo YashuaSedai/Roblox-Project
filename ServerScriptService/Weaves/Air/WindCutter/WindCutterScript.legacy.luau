@@ -16,6 +16,7 @@ local WeavingModule = require(WeavingFolder:WaitForChild("WeavingModule"))
 local Dictionary = require(WeavingFolder:WaitForChild("Dictionary"))
 local DebuffHandler = require(Modules:WaitForChild("DebuffHandler"):WaitForChild("DebuffHandler"))
 local RagdollService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("RagdollService"))
+local MovementService = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("MovementService"))
 local ProjectileService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("ProjectileService"))
 
 -- REMOTES
@@ -58,6 +59,7 @@ local function cancelCast(player, char)
 	char:SetAttribute("Charging", false)
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	if hum then hum:SetAttribute("Charge", 0) end
+	MovementService.ClearSource(char, "Cast") -- the cast's slow / lock ends with the cast
 
 	WeavingFxClear:FireAllClients(player.UserId, WEAVE, true) -- true = cancelled
 	ProjectileEvent:FireAllClients("Fizzle", player.UserId, WEAVE) -- remove the held fireball
@@ -69,6 +71,16 @@ RagdollService.Ragdolled:Connect(function(char)
 		cancelCast(player, char)
 	end
 end)
+
+-- ANY status effect that blocks casting (Frozen, Shielded, Stunned, Rooted...) cancels the cast the same way a ragdoll does
+if MovementService.CastBlocked then
+	MovementService.CastBlocked:Connect(function(char)
+		local player = Players:GetPlayerFromCharacter(char)
+		if player then
+			cancelCast(player, char)
+		end
+	end)
+end
 
 -- BARRIER REFLECTION: returns newDirection, newSpeed, newOwner (or nil = no reflection)
 -- Dormant until barriers exist on the server (Veil of Reflection is still built on each client).
@@ -94,17 +106,18 @@ WeavingFxEvent.OnServerEvent:Connect(function(player: Player, weaveName)
 
 	local char, hum, humRP = getAlive(player)
 	if not char then return end
-	if RagdollService.IsRagdolled(char) then return end
+	if (RagdollService.IsRagdolled(char) or not MovementService.CanCast(char)) then return end
 
 	local old = sessions[player]
 	if old and old.char == char and os.clock() - old.startedAt < 30 then return end -- already channeling
 	if os.clock() < (cooldownUntil[player] or 0) then return end                   -- on cooldown
 
+	-- no Source, no cast. Pay BEFORE the session exists: a session left behind by a failed payment could be released for free.
+	if not WeavingModule.DeductSource(player, hum, weaveData.SourceCost) then return end
+
 	local now = os.clock()
 	local session = { startedAt = now, paidUntil = now, level = getLevel(player), char = char }
 	sessions[player] = session
-	
-	if not WeavingModule.DeductSource(player, hum, weaveData.SourceCost) then return end
 
 	WeavingFxEvent:FireAllClients(char, hum, humRP, weaveName)
 end)
@@ -120,10 +133,22 @@ WeavingEvent.OnServerEvent:Connect(function(player: Player, weaveName, _charge, 
 	local weaveData = Dictionary[WEAVE]
 	if not weaveData then return end
 
-	local char = getAlive(player)
-	if not char or char ~= session.char then return end
-	if RagdollService.IsRagdolled(char) then return end
-	if typeof(mousePos) ~= "Vector3" or not (mousePos.Magnitude < 1e5) then return end
+	-- The session is already gone at this point, so EVERY rejection below has to remove the held visuals on the clients.
+	-- (before, these just returned: the held visuals were left behind for good)
+	local char, hum = getAlive(player)
+	if not char or char ~= session.char then
+		ProjectileEvent:FireAllClients("Fizzle", player.UserId, WEAVE)
+		return
+	end
+	if (RagdollService.IsRagdolled(char) or not MovementService.CanCast(char)) then
+		cooldownUntil[player] = os.clock() + weaveData.DebounceDuration
+		ProjectileEvent:FireAllClients("Fizzle", player.UserId, WEAVE)
+		return
+	end
+	if typeof(mousePos) ~= "Vector3" or not (mousePos.Magnitude < 1e5) then
+		ProjectileEvent:FireAllClients("Fizzle", player.UserId, WEAVE)
+		return
+	end
 
 	cooldownUntil[player] = os.clock() + weaveData.DebounceDuration
 
@@ -145,7 +170,7 @@ WeavingEvent.OnServerEvent:Connect(function(player: Player, weaveName, _charge, 
 	-- the blade leaves the hand after the cast wind-up
 	task.delay(weaveData.CastDelay or DEFAULT_CAST_DELAY, function()
 		local c, _, root = getAlive(player)
-		if not c or c ~= char or RagdollService.IsRagdolled(c) then
+		if not c or c ~= char or (RagdollService.IsRagdolled(c) or not MovementService.CanCast(c)) then
 			ProjectileEvent:FireAllClients("Fizzle", player.UserId, WEAVE)
 			return
 		end
@@ -180,7 +205,7 @@ WeavingEvent.OnServerEvent:Connect(function(player: Player, weaveName, _charge, 
 			end,
 
 			-- turn on when Veil of Reflection is ported:
-			-- onBarrier = function(proj, result) return reflect(proj, result, ctx) end,
+			onBarrier = function(proj, result) return reflect(proj, result, ctx) end,
 		})
 	end)
 end)

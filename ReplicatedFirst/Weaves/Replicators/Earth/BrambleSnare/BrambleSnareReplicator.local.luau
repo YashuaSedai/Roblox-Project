@@ -25,7 +25,7 @@ local EffectsFolder = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Wea
 
 local BrambleSnareTable = {}
 
-WeavingInstantEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName, mousePos, DAMAGE, AREA, CAST_RANGE)
+WeavingInstantEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName, mousePos, DAMAGE, AREA, CAST_RANGE, enemies)
 	if weaveName ~= "BrambleSnare" then return end
 
 	local player = Players:GetPlayerFromCharacter(char)
@@ -39,33 +39,9 @@ WeavingInstantEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName, 
 		BrambleSnareTable[userId] = {}
 	end
 
-	-- *=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=* MAIN CHECKER *=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-	local flag = false
-	local startTime = tick()  -- Start measuring time
+	-- (the SERVER decides when the snare lands and who is inside it; this event only arrives at that moment)
+	if typeof(enemies) ~= "table" then BrambleSnareTable[userId] = nil return end
 
-	BrambleSnareTable[userId].AnimationConnection = AnimationSignal.OnClientEvent:Connect(function(weaveName: string, phase: string, userId)
-		if weaveName ~= "BrambleSnare" then warn("WeaveName isn't BrambleSnare, returning from Replicator AnimationConnection") return end
-		if phase ~= "Channel" then warn("Phase isn't Channel in BrambleSnare, returning from Replicator AnimationConnection") return end
-		if player.UserId ~= userId then return end
-
-		flag = true
-	end)
-
-	-- Standard repeat-until loop
-	repeat
-		-- Delay before the next loop iteration
-		task.wait(1)  -- Waits for 1 second
-	until flag == true or tick() - startTime >= 3.5  -- Waits for flag to be true or 3 seconds to pass
-
-	-- Code to execute after the loop finishes
-	if flag then
-		BrambleSnareTable[userId].AnimationConnection:Disconnect()
-	else
-		--warn("BrambleSnareReplicator did not receive the animation signal")
-		BrambleSnareTable[userId].AnimationConnection:Disconnect()
-		return -- RETURN THE SCRIPT IMMEDIATELY TO AVOID CONNECTING UNNECESSARY STUFF FURTHER
-	end
-	
 	-- *=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=* MAIN CODE *=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 	-- Prepare Folder for easier cleanup
 	local Folder = Instance.new("Folder")
@@ -79,27 +55,17 @@ WeavingInstantEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName, 
 	newExplosion.Parent = Folder
 	newExplosion:Play()
 
-	-- Store Enemies in a table
-	for _, part in workspace:GetChildren() do -- Look for instances in the workspace
-		if part:IsA("Model") and part:FindFirstChild("Humanoid") and part.Name ~= player.Name then -- confirm the model if the instance has a Humanoid child
-			local char = part -- The part is a character if it has a humanoid child
-			local humanoidRootPart = char:FindFirstChild("HumanoidRootPart") -- Locate the root part of every character found
-			if humanoidRootPart then
-				local mag = (humanoidRootPart.Position - mousePos).magnitude -- Calculate the distance between the position of the mouse and every hrp found
-
-				if mag < AREA and char.Name ~= player.Name then -- if the magnitude is less than (or inside) the AREA
-					-- TODO: Setup barriers
-					table.insert(EnemiesTable, char) -- Add the enemy in the table
-
-				end
-			end	
+	-- The enemies come from the server
+	for _, enemy in enemies do
+		if typeof(enemy) == "Instance" and enemy.Parent and enemy:FindFirstChild("HumanoidRootPart") then
+			table.insert(EnemiesTable, enemy)
 		end
 	end
-	
+
 	if not BrambleSnareTable[userId].ChosenAnimations then
 		BrambleSnareTable[userId].ChosenAnimations = {}
 	end
-	
+
 	-- Handle enemy position Animation
 	for _, Enemies in EnemiesTable do
 		local EnemyHumanoid = Enemies:FindFirstChild("Humanoid")
@@ -112,28 +78,8 @@ WeavingInstantEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName, 
 		AnimationHandler.PlayAnimation(Enemies, ChosenAnimation, 1, Enum.AnimationPriority.Action4, true, 0)
 	end
 
-	-- Handle the damage
-	BrambleSnareTable[userId].TaskLoop = task.spawn(function()
-		
-		-- Root Enemies
-		for _, Enemies in EnemiesTable do
-			DebuffHandler.FireRoot(player, userId, Enemies, true)
-		end
-		
-		while EnemiesTable and BrambleSnareTable[userId] do
-			-- Loop through EnemiesTable
-			for _, Enemies in EnemiesTable do
-				-- Locate important parts
-				local EnemyHumanoid = Enemies:FindFirstChild("Humanoid")
+	-- (rooting and damage ticks are applied by the SERVER; this script only draws the vines)
 
-				-- Handle Damage
-				DebuffHandler.FireDamage(player, player.UserId, EnemyHumanoid, DAMAGE)
-				
-			end
-			task.wait(1)
-		end
-	end)
-	
 	-- Do effects
 	BrambleSnareTable[userId].TaskEffect = task.spawn(function()
 		if BrambleSnareTable[userId] then
@@ -176,6 +122,8 @@ WeavingInstantEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName, 
 
 	-- Cleanup Function
 	local function CleanUp()
+		
+		local data = BrambleSnareTable[userId]; if not data then return end
 
 		-- Tween the vines
 		task.spawn(function()
@@ -196,7 +144,7 @@ WeavingInstantEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName, 
 			task.wait(3)
 			Folder:Destroy()
 		end)
-		
+
 		-- Stop animations
 		for _, data in ipairs(BrambleSnareTable[userId].ChosenAnimations) do
 			local Enemy = data.Enemy
@@ -205,15 +153,10 @@ WeavingInstantEvent.OnClientEvent:Connect(function(char, hum, humRP, weaveName, 
 			AnimationHandler.StopAnimation(Enemy, Animation)
 		end
 
-		-- Unroot Enemies and Stop Animation
-		for _, Enemies in EnemiesTable do
-			-- Locate important parts
-			local EnemyHumanoid = Enemies:FindFirstChild("Humanoid")
-			DebuffHandler.FireRoot(player, player.UserId, Enemies, false)
-		end
-		
+		-- (the server unroots them)
+
 		task.wait(2)
-		
+
 		-- Clear Enemies Table
 		if EnemiesTable then EnemiesTable = {} end
 		if BrambleSnareTable[userId] and BrambleSnareTable[userId].ChosenAnimations then BrambleSnareTable[userId].ChosenAnimations = nil end

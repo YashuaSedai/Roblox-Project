@@ -57,6 +57,9 @@ local function onLaunch(id, ownerUserId, origin, direction, speed, lifetime, ser
 		folder = Instance.new("Folder")
 		folder.Name = "FireballProjectile"
 		projectile = FireballAssets:WaitForChild("FireballEffect"):Clone()
+		projectile.CanTouch = false
+		projectile.CanCollide = false
+		projectile.CanQuery = false
 		projectile.Parent = folder
 	end
 	folder.Parent = workspace
