@@ -5,7 +5,10 @@
 --   * BurnThreshold  (NumberValue on the Humanoid)   the meter's maximum. Reaching it = burning out.
 --   * BurningOut     (attribute on the character)    true while the penalty is active (for warning effects).
 --
--- The filling is done by WeavingModule.DeductSource (it adds  Source spent x the "PerSource" attribute  to Burn),
+-- Burn also fills when Source REGENERATES above 50% of MaxSource (SourceSetup does that, using the "PerRegen"
+-- attribute below).
+--
+-- The filling from casting is done by WeavingModule.DeductSource (it adds  Source spent x the "PerSource" attribute  to Burn),
 -- so every weave fills the meter, including channeled weaves that pay every 0.1s, with no change to the weaves.
 -- Only Weavers get a meter (the same rule as Source).
 
@@ -16,10 +19,11 @@ local Players = game:GetService("Players")
 local BASE_THRESHOLD = 100            -- threshold at level 0
 local THRESHOLD_PER_LEVEL = 4         -- same growth as MaxSource (100 + level * 4)
 local BURN_PER_SOURCE = 0.5           -- Burn gained for every 1 Source spent
+local BURN_PER_REGEN = 0.5            -- Burn gained for every 1 Source regenerated ABOVE 50% of MaxSource (read by SourceSetup)
 local DECAY_DELAY = 3                 -- seconds without casting before the meter starts to fall
 local DECAY_PER_SECOND = 2            -- Burn lost per second while resting
 local RECOVER_AT = 0.75               -- burning out stops once Burn falls below this fraction of the threshold
-local DAMAGE_PERCENT_PER_SECOND = 5	   -- % of max health lost per second while burning out (Roblox's own regen heals ~1%/s)
+local DAMAGE_PERCENT_PER_SECOND = 6	   -- % of max health lost per second while burning out (was 5; Roblox's own regen heals ~1%/s)
 local CAN_KILL = true                -- false: burnout never takes you below 1 HP. true: it can kill.
 
 local TICK = 0.1                      -- how often the meter updates
@@ -44,6 +48,7 @@ local function startMeter(char: Model, hum: Humanoid, level: NumberValue)
 	burn.Name = "Burn"
 	burn.Value = 0
 	burn:SetAttribute("PerSource", BURN_PER_SOURCE) -- read by WeavingModule.DeductSource
+	burn:SetAttribute("PerRegen", BURN_PER_REGEN)   -- read by SourceSetup (regenerating above 50% fills Burn)
 	burn.Parent = hum
 
 	local threshold = Instance.new("NumberValue")
