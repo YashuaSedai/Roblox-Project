@@ -18,6 +18,12 @@ local DebuffHandler = {
 	RootVFX = {}
 }
 
+-- All damage goes through DamageService. It lives in ServerScriptService, so it's required on demand: this module is also
+-- required by clients, which never deal damage.
+local function getDamageService()
+	return require(game:GetService("ServerScriptService"):WaitForChild("SYSTEM"):WaitForChild("DamageService"))
+end
+
 -- FUNCTION TO DEAL DAMAGE OVER TIME
 function DebuffHandler.DoT(player: Player, userId: number, targetHumanoid: Humanoid, damage: number, duration: number, perTick: number)
 	if player == nil then warn("DoT did not receive a player") return end
@@ -34,8 +40,7 @@ function DebuffHandler.DoT(player: Player, userId: number, targetHumanoid: Human
 		local function applyDoT()
 			while elapsedTime < duration do
 				if targetHumanoid and targetHumanoid.Health > 0 then
-					targetHumanoid:TakeDamage(tickDamage)
-					DebuffHandler.LastAttackerAndDamage(player, targetHumanoid, tickDamage)
+					getDamageService().Damage(targetHumanoid, tickDamage, player, { Source = "DoT" })
 				else
 					break -- Stop if target is dead
 				end
@@ -54,10 +59,9 @@ function DebuffHandler.Damage(player: Player, userId: number, targetHumanoid:Hum
 	if userId == nil then warn("Damage did not receive a userId") return end
 	if targetHumanoid == nil then warn("Damage did not receive a target humanoid") return end
 	if damage == nil then warn("Damage did not receive a damage value") return end
-	
+
 	if player.UserId == userId then
-		targetHumanoid:TakeDamage(damage)
-		DebuffHandler.LastAttackerAndDamage(player, targetHumanoid, damage)
+		getDamageService().Damage(targetHumanoid, damage, player, { Source = "Damage" })
 	end
 end
 
@@ -135,11 +139,11 @@ function DebuffHandler.Knockback(obj, targetCharacter: Model?, duration: number,
 			local att = Instance.new("Attachment", targetHumanoidRP)
 			local force = Instance.new("VectorForce", targetHumanoidRP)
 			force.Attachment0 = att	
-			
+
 			local rawForceDir = direction + Vector3.new(0, adjustedUpwardForce, 0)
 			if rawForceDir.Magnitude == 0 then rawForceDir = Vector3.new(0, 1, 0) end
 			force.Force = rawForceDir.Unit * adjustedForce
-			
+
 			force.RelativeTo = Enum.ActuatorRelativeTo.World
 			targetCharacter.Humanoid.PlatformStand = true
 
@@ -153,7 +157,7 @@ function DebuffHandler.Knockback(obj, targetCharacter: Model?, duration: number,
 			game.Debris:AddItem(force, 0.2)
 			game.Debris:AddItem(rotation, 0.2)
 			game.Debris:AddItem(att, 0.2)
-			
+
 			task.wait(duration)
 			targetCharacter.Humanoid.PlatformStand = false
 		end
@@ -243,29 +247,29 @@ function DebuffHandler.ApplyRagdoll(targetCharacter: Model)
 	for _, joint in pairs(targetCharacter:GetDescendants()) do
 		if joint:IsA("Motor6D") then
 			-- Exclude the neck joint so the head doesn't dangle
-		
-				-- Only apply if not already ragdolled (check for existing constraint)
-				if not joint:FindFirstChild("RagdollSocket") then
-					local socket = Instance.new("BallSocketConstraint")
-					socket.Name = "RagdollSocket"
-					socket.Parent = joint.Parent
 
-					local att0 = Instance.new("Attachment")
-					att0.Parent = joint.Part0
-					local att1 = Instance.new("Attachment")
-					att1.Parent = joint.Part1
+			-- Only apply if not already ragdolled (check for existing constraint)
+			if not joint:FindFirstChild("RagdollSocket") then
+				local socket = Instance.new("BallSocketConstraint")
+				socket.Name = "RagdollSocket"
+				socket.Parent = joint.Parent
 
-					att0.CFrame = joint.C0
-					att1.CFrame = joint.C1
+				local att0 = Instance.new("Attachment")
+				att0.Parent = joint.Part0
+				local att1 = Instance.new("Attachment")
+				att1.Parent = joint.Part1
 
-					socket.Attachment0 = att0
-					socket.Attachment1 = att1
-					socket.TwistLimitsEnabled = true
-					socket.LimitsEnabled = true
+				att0.CFrame = joint.C0
+				att1.CFrame = joint.C1
 
-					joint.Enabled = false
-				end
-			
+				socket.Attachment0 = att0
+				socket.Attachment1 = att1
+				socket.TwistLimitsEnabled = true
+				socket.LimitsEnabled = true
+
+				joint.Enabled = false
+			end
+
 		end
 	end
 end
@@ -302,7 +306,39 @@ end
 
 -- FUNCTION TO STUN A PLAYER
 function DebuffHandler.Stun(player: Player, targetCharacter: Model?, duration: number)
-	
+
+end
+
+-- BODY PARTS ARE ANCHORED BY BOTH FREEZE AND ROOT, so they share one record: the first effect to anchor a part saves its original
+-- state, and the part is let go only when NEITHER effect is left. Each effect ends cleanly on its own schedule. (The old code made
+-- the one that ended first wait 2 seconds for the other and then just GIVE UP and return: a freeze that ended while the player was
+-- rooted never removed its ice, and a root that ended while frozen left them Rooted for good.)
+DebuffHandler.AnchoredParts = {} -- [character] = { [part] = original Anchored value }
+
+local function anchorParts(char: Model, includeRoot: boolean)
+	local record = DebuffHandler.AnchoredParts[char]
+	if not record then
+		record = {}
+		DebuffHandler.AnchoredParts[char] = record
+	end
+	for _, part in char:GetDescendants() do
+		if part:IsA("BasePart") and (includeRoot or part.Name ~= "HumanoidRootPart") and record[part] == nil then
+			record[part] = part.Anchored
+			part.Anchored = true
+		end
+	end
+end
+
+-- lets go of everything the effects anchored, unless a freeze or a root is still active
+local function releaseParts(char: Model)
+	if not DebuffHandler.CheckUnanchor(char) then return end -- something still holds them: it releases them when it ends
+	local record = DebuffHandler.AnchoredParts[char]
+	DebuffHandler.AnchoredParts[char] = nil
+	if record then
+		for part, wasAnchored in record do
+			if part.Parent then part.Anchored = wasAnchored end
+		end
+	end
 end
 
 -- FUNCTION TO FREEZE A PLAYER
@@ -323,12 +359,12 @@ function DebuffHandler.Freeze(player: Player, targetCharacter: Model?, duration:
 	local currentDuration = targetCharacter:GetAttribute("FrozenDuration") or 0
 	targetCharacter:SetAttribute("FrozenDuration", currentDuration + duration)
 	targetCharacter:SetAttribute("Frozen", true)
-	
+
 	-- If already frozen, do not start a new freeze process
 	if currentDuration > 0 then
 		return
 	end
-	
+
 	-- Create Ice Vfx for player
 	if not DebuffHandler.FreezeVFX[targetCharacter] then
 		DebuffHandler.FreezeVFX[targetCharacter] = {}
@@ -338,16 +374,8 @@ function DebuffHandler.Freeze(player: Player, targetCharacter: Model?, duration:
 
 	table.insert(DebuffHandler.FreezeVFX[targetCharacter], iceEffect)
 
-	-- Store original anchored states
-	local originalAnchors = {}
-
-	-- Anchor all body parts
-	for _, part in ipairs(targetCharacter:GetDescendants()) do
-		if part:IsA("BasePart") and part ~= humanoidRootPart then -- Exclude root part for stability
-			originalAnchors[part] = part.Anchored
-			part.Anchored = true
-		end
-	end
+	-- Anchor all body parts (not the root part: "for stability")
+	anchorParts(targetCharacter, false)
 
 	-- Disable movement
 	MovementService.Refresh(targetCharacter) -- WalkSpeed / Jump are written by MovementService only
@@ -362,59 +390,45 @@ function DebuffHandler.Freeze(player: Player, targetCharacter: Model?, duration:
 
 		-- Unfreeze the character once the duration expires
 		if targetCharacter and humanoid then
-			
+
 			-- Immediately Set Frozen Attribute to False
 			targetCharacter:SetAttribute("Frozen", false)
-			
-			-- Check whether unanchoring is allowed
-			local flag = DebuffHandler.CheckUnanchor(targetCharacter)
-			local startTime = tick()  -- Start measuring time
 
-			-- Standard repeat-until loop
-			repeat
-				flag = DebuffHandler.CheckUnanchor(targetCharacter)
-				task.wait()  -- Waits for 1 second
-			until flag == true or tick() - startTime >= 2  -- Waits for flag to be true or 2 seconds to pass
+			-- Let go of the body parts, but only if nothing else (a root) is still holding them. The ICE below is cleaned up
+			-- either way, so it can't be left on the player.
+			releaseParts(targetCharacter)
 
-			if flag == false then return end
-			
-			-- Unanchor if unanchoring is allowed
-			for part, wasAnchored in pairs(originalAnchors) do
-				if part then
-					part.Anchored = false
-				end
-			end
-			
 			-- Check status whether returning original walkspeed and jumppower is allowed
 			if DebuffHandler.CheckStatus(targetCharacter) then
 				MovementService.Refresh(targetCharacter)
 			end
-			
+
 			-- Clean up the ice
 			if DebuffHandler.FreezeVFX[targetCharacter] then
 				for _, ice in ipairs(DebuffHandler.FreezeVFX[targetCharacter]) do
 					if ice then 
-						ice:FindFirstChild("ice heavy impact"):Play()
-						
+						local impactSound = ice:FindFirstChild("ice heavy impact")
+						if impactSound then impactSound:Play() end
+
 						for _, weldconstraint in ice:GetChildren() do
 							if weldconstraint and weldconstraint:IsA("WeldConstraint") then 
 								weldconstraint:Destroy();
 							end
 						end
-						
+
 						for _, union in ice:GetChildren() do
 							if union and union:IsA("UnionOperation") then
 								union.CanCollide = true
 							end
 						end
-						
+
 						task.delay(2, function()
-							
+
 							if ice and ice.Smoke then 
 								ice.Smoke.Enabled = false 
 								Effects.NumberValueTweenObj(ice.Smoke, "ParticleEmitter", "Transparency", 0, 2, 1, 60)
 							end
-							
+
 							-- Tween union size 
 							for _, union in ice:GetChildren() do
 								if union and union:IsA("UnionOperation") then
@@ -423,10 +437,10 @@ function DebuffHandler.Freeze(player: Player, targetCharacter: Model?, duration:
 									local goal = {Size = Vector3.new(0.1, 0.1, 0.1)} -- Minimum size before destruction
 									local tween = TweenService:Create(union, tweenInfo, goal)
 									tween:Play()
-									
+
 								end
 							end
-							
+
 							task.wait(2)
 							ice:Destroy() 
 						end)
@@ -440,20 +454,20 @@ end
 
 -- FUNCTION TO CREATE ICE AROUND PLAYER
 function DebuffHandler.FreezeVisual(targetCharacter: Model?, Name: string)
-	
+
 	local newIce = Ice:Clone()
-	
+
 	local humanoidRootPart = targetCharacter:FindFirstChild("HumanoidRootPart")
 	newIce.CFrame = humanoidRootPart.CFrame * CFrame.new(0, 3.25, 0)
 	newIce.Rotation = Vector3.new(
-			0, -- Random X rotation
-			math.random(0, 360), -- Random Y rotation
-			0  -- Random Z rotation
-		)
+		0, -- Random X rotation
+		math.random(0, 360), -- Random Y rotation
+		0  -- Random Z rotation
+	)
 
 	newIce.Parent = workspace
 	newIce.Name = "Freeze_ICE_" .. Name
-	
+
 	return newIce
 end
 
@@ -462,43 +476,38 @@ function DebuffHandler.Root(player: Player, targetCharacter: Model?, duration: n
 	if not player then warn("Root did not receive a player") return end
 	if not targetCharacter then warn("Root did not receive a target character") return end
 	if duration == nil then warn("Root did not receive a duration") end
-	
+
 	local humanoidRootPart = targetCharacter:FindFirstChild("HumanoidRootPart")
 	local humanoid = targetCharacter:FindFirstChild("Humanoid")
-	
+
 	local rootCount = targetCharacter:GetAttribute("RootCount") or 0
-	
+
 	-- Dictionary for storing roots
 	if not DebuffHandler.RootVFX[targetCharacter] then
 		DebuffHandler.RootVFX[targetCharacter] = {}
 	end
-	
+
 	if duration and typeof(duration) == "number" then
-		
+
 		-- Get current root duration and extend it
 		local currentDuration = targetCharacter:GetAttribute("RootDuration") or 0
 		targetCharacter:SetAttribute("RootDuration", currentDuration + duration)
-		
+
 		targetCharacter:SetAttribute("Rooted", true)
 		targetCharacter:SetAttribute("RootCount", rootCount + 1) -- Increment root counter
 
 		-- Anchor all body parts
-		for _, part in ipairs(targetCharacter:GetDescendants()) do
-			if part:IsA("BasePart") then
-				DebuffHandler.RootVFX[targetCharacter][part] = part.Anchored
-				part.Anchored = true
-			end
-		end
+		anchorParts(targetCharacter, true)
 
 		-- Disable movement
 		MovementService.Refresh(targetCharacter) -- WalkSpeed / Jump are written by MovementService only
-		
+
 		task.spawn(function()
 			while targetCharacter:GetAttribute("RootDuration") > 0 do
 				task.wait(1)
 				local newDuration = targetCharacter:GetAttribute("RootDuration") - 1
 				targetCharacter:SetAttribute("RootDuration", math.max(newDuration, 0))
-				
+
 				-- Update RootCount when duration ends
 				if targetCharacter:GetAttribute("RootDuration") == 0 then
 					local updatedRootCount = targetCharacter:GetAttribute("RootCount") - 1
@@ -508,27 +517,10 @@ function DebuffHandler.Root(player: Player, targetCharacter: Model?, duration: n
 
 			if targetCharacter:GetAttribute("RootCount") == 0 then
 				if targetCharacter and humanoid then
-					
-					-- Check whether unanchoring is allowed
-					local flag = DebuffHandler.CheckUnanchor(targetCharacter)
-					local startTime = tick()  -- Start measuring time
 
-					-- Standard repeat-until loop
-					repeat
-						flag = DebuffHandler.CheckUnanchor(targetCharacter)
-						task.wait()  -- Waits for 1 second
-					until flag == true or tick() - startTime >= 2  -- Waits for flag to be true or 2 seconds to pass
-
-					if flag == false then return end
-					
-					-- Unanchor parts
-					for part, wasAnchored in pairs(DebuffHandler.RootVFX[targetCharacter]) do
-						if part then
-							part.Anchored = false
-						end
-					end
-
+					-- the root is over: clear it FIRST, then let go of the body parts unless a freeze is still holding them
 					targetCharacter:SetAttribute("Rooted", false)
+					releaseParts(targetCharacter)
 
 					if DebuffHandler.CheckStatus(targetCharacter) then
 						MovementService.Refresh(targetCharacter)
@@ -537,57 +529,30 @@ function DebuffHandler.Root(player: Player, targetCharacter: Model?, duration: n
 				end
 			end
 		end)
-		
+
 	elseif typeof(duration) == "boolean" then
 		if duration then
 			targetCharacter:SetAttribute("Rooted", true)
 			targetCharacter:SetAttribute("RootCount", rootCount + 1) -- Increment root counter
-			-- Anchor all body parts
-			for _, part in ipairs(targetCharacter:GetDescendants()) do
-				if part:IsA("BasePart") and part ~= humanoidRootPart then -- Exclude root part for stability
-					DebuffHandler.RootVFX[targetCharacter][part] = part.Anchored
-					part.Anchored = true
-				end
-			end
+			-- Anchor all body parts (not the root part: "for stability")
+			anchorParts(targetCharacter, false)
 
 			-- Disable movement
 			MovementService.Refresh(targetCharacter) -- WalkSpeed / Jump are written by MovementService only
-			
+
 		elseif duration == false then
-			
+
 			if targetCharacter and humanoid then
-				
+
 				-- Set root to false
 				targetCharacter:SetAttribute("Rooted", false)
-				
+
 				local updatedRootCount = targetCharacter:GetAttribute("RootCount") - 1
 				targetCharacter:SetAttribute("RootCount", math.max(updatedRootCount, 0))
-				
-				print(`ROOT COUNT IS ABOUT TO BE SUBTRACTED`)
+
 				if targetCharacter:GetAttribute("RootCount") == 0 then
-					print(`ROOT COUNT IS ZERO HANDLING  UNANCHORING NOW`)
-					
-					-- Check whether unanchoring is allowed
-					local flag = DebuffHandler.CheckUnanchor(targetCharacter)
-					print(`INITIAL FLAG IS: {flag}`)
-					local startTime = tick()  -- Start measuring time
-
-					-- Standard repeat-until loop
-					repeat
-						flag = DebuffHandler.CheckUnanchor(targetCharacter)
-						task.wait()  -- Waits for 1 second
-					until flag == true or tick() - startTime >= 2  -- Waits for flag to be true or 2 seconds to pass
-					
-					print(`LAST FLAG IS: {flag}`)
-					if flag == false then return end
-
-					-- Unanchor if allowed
-					for part, wasAnchored in pairs(DebuffHandler.RootVFX[targetCharacter]) do
-						if part then
-							part.Anchored = false
-							print(`{part.Anchored} from {targetCharacter}`)
-						end
-					end
+					-- let go of the body parts unless a freeze is still holding them (it releases them when it ends)
+					releaseParts(targetCharacter)
 
 					if DebuffHandler.CheckStatus(targetCharacter) then
 						MovementService.Refresh(targetCharacter)
@@ -602,7 +567,7 @@ end
 function DebuffHandler.LastAttackerAndDamage(player: Player, targetHumanoid: Humanoid, damage: number)
 	if player == nil then warn("Last Attacker/Damage did not receive a player") return end
 	if targetHumanoid == nil then warn("Last Attacker/Damage did not receive a humanoid") return end
-	
+
 	targetHumanoid:SetAttribute("LastAttacker", player.UserId)
 	targetHumanoid:SetAttribute("LastDamage", damage)
 end
@@ -641,9 +606,9 @@ end
 
 -- DEDUCTS BARRIER HEALTH
 function DebuffHandler.DeductBarrierHealth(barrierHealth, amount)
-	
+
 	barrierHealth.Value = barrierHealth.Value - amount
-	
+
 end
 
 return DebuffHandler

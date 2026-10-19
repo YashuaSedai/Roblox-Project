@@ -30,6 +30,7 @@ local AnimationHandler = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitFo
 local Utilities = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("UTILITIES"))
 local Dictionary = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("WeavingModule"):WaitForChild("Dictionary"))
 local MovementService = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("MovementService"))
+local LinkData = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("LinkData"))
 
 local DebounceHandler = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("DebounceHandler"):WaitForChild("Debounces"))
 --=========================================== MAIN REQUIREMENTS ===========================================
@@ -75,12 +76,15 @@ AnimationHandler.LoadAnimations(Animator)
 AnimationHandler.LoadAllAnimations(Character)
 --=========================================== ANIMATIONS =========================================== 
 
+
+-- INITIALIZE SLOTS
 task.spawn(function()
-	-- INITIALIZE SLOTS
-	local SlotsUI = Character:WaitForChild("Head"):WaitForChild("SlotsUI"):WaitForChild("BillboardGui")
-	for _, slots in SlotsUI:GetChildren() do
-		if slots and slots:IsA("Frame") then slots.Visible = true end
+	local gui = Character:WaitForChild("Head"):WaitForChild("SlotsUI"):WaitForChild("BillboardGui", math.huge)
+	local function show(child)
+		if child:IsA("Frame") then child.Visible = true end
 	end
+	for _, child in gui:GetChildren() do show(child) end
+	gui.ChildAdded:Connect(show) -- a slot that arrives late still gets turned on
 end)
 
 -- VARIABLES
@@ -95,7 +99,7 @@ local elementKeyMap = {
 -- MAIN CONTROL TO TOGGLE WEAVING
 UserInputService.InputBegan:Connect(function(input, gpe)
 	if input.KeyCode ~= Enum.KeyCode.LeftAlt then return end
-		ElementalHandler.IsWeaving(Player, gpe)
+	ElementalHandler.IsWeaving(Player, gpe)
 end)
 
 -- MAIN CONTROL FOR ADDING/REMOVING ELEMENTS
@@ -109,24 +113,28 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 local inputDebounce = false
-local InputEndedConnection
-local DeathConnection
-local StatusEffectConnection
-local SourceDepletionConnection
+-- The clean up of the cast that is being held right now (nil when nothing is held).
+-- The four connections of a cast (key release, death, status effect, source depleted) are LOCAL to that cast, see BeginCast.
+-- They used to be shared variables: pressing R (Stilling) while E (Shielding) was still held overwrote them, so letting go of E
+-- later disconnected the STILLING's key-release listener and the weave sat in "Holding" until the 20s timeout.
+local activeCast = nil
 
 -- CONTROL FOR RELEASING THE WEAVE
-UserInputService.InputBegan:Connect(function(input, gpe)
-	if input.KeyCode ~= Enum.KeyCode.E or gpe or inputDebounce then return end
+-- E casts a normal weave. R casts a weave that REQUIRES LINKING (Dictionary: RequiresLink = true).
+-- Both keys run the same code below; castKey is the key that was pressed, and it is also the key whose release ends the cast.
+local function BeginCast(castKey: Enum.KeyCode)
+	local isLinkCast = castKey == Enum.KeyCode.R
+	if inputDebounce then return end
 	inputDebounce = true
 	task.delay(0.5, function() inputDebounce = false end)
-	
+
 	-- A Frozen / Shielded / Rooted / Stunned / Ragdolled player can't cast. Checked BEFORE Start so the drawn slots aren't wasted.
 	-- (the server enforces the same rule in WeavingModule.DeductSource, this is just the instant feedback)
 	if not MovementService.CanCast(Character) then
 		GuiRelatedThings.ErrorMessage(Player, "You can't cast right now")
 		return
 	end
-	
+
 	-- Acquire the Name of the Weave
 	local WeaveName = WeavingModule.Start(Player, Animations)
 	if WeaveName == nil then return warn("There is no WeaveName specified") end
@@ -134,6 +142,23 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 	-- PRIMARY CHECKERS
 	local WeaveData = Dictionary[WeaveName]
 	if not WeaveData then return warn("No data found for the specified WeaveName") end
+
+	-- LINKING: a weave that needs a link is cast with R, everything else with E.
+	-- (the drawn elements are already spent at this point, so a failed link cast costs them: "the weave fails")
+	if WeaveData.RequiresLink and not isLinkCast then
+		GuiRelatedThings.ErrorMessage(Player, `{WeaveName} needs a link: cast it with R`)
+		return
+	elseif isLinkCast and not WeaveData.RequiresLink then
+		GuiRelatedThings.ErrorMessage(Player, `{WeaveName} doesn't need a link: cast it with E`)
+		return
+	end
+	if WeaveData.RequiresLink then
+		local linkOk, linkReason = LinkData.CheckRequirement(Character, WeaveData)
+		if not linkOk then
+			GuiRelatedThings.ErrorMessage(Player, linkReason or "Not enough links")
+			return
+		end
+	end
 
 	-- Checks if Weave is on cooldown
 	local isOnCooldown = DebounceHandler.DebounceCheck2(Player, Humanoid, WeaveName)
@@ -143,15 +168,16 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 	end
 
 	-- Acquires Cast Range
-	local CastRange = WeaveData.CastRange and (WeaveData.CastRange + Level.Value) or nil
+	-- (FixedRange weaves, like Stilling, use exactly CastRange and don't add the Level)
+	local CastRange = WeaveData.CastRange and (WeaveData.CastRange + (WeaveData.FixedRange and 0 or Level.Value)) or nil
 	local MousePos = Mouse.Hit.Position
-	
+
 	-- Acquires Target
 	local MouseTarget
 	if WeaveData.RequiresTarget then 
 		MouseTarget = Utilities.findCharacter(Mouse.Target, CastRange, Player) 
 	end
-	
+
 
 	-- Checks Range & Target Requirement
 	if CastRange and WeaveData.Instant and WeaveData.RequiresPosition and not WeavingModule.CheckRange(CastRange, MousePos, HumanoidRP.Position) then
@@ -161,7 +187,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 		GuiRelatedThings.ErrorMessage(Player, `{WeaveName} is unable to detect a target`)
 		return
 	end
-	
+
 	-- MOVEMENT WHILE CASTING (Dictionary: Controls / SlowPercentage) is applied by the SERVER (MovementServer + MovementService),
 	-- not here. The old client code disabled the controls / slowed WalkSpeed BEFORE the Source check, so "not enough Source"
 	-- returned early and left the player unable to move (bug 8), and its clean up wrote WalkSpeed = 16 even while shielded (bug 6).
@@ -172,6 +198,16 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 	if Sourced == false then 
 		GuiRelatedThings.ErrorMessage(Player, "You do not have enough Source") 
 		return 
+	end
+
+	-- ONE HELD CAST AT A TIME: starting a new weave ends the one still held (the server does the same, e.g. ShieldingScript lets go
+	-- of the shield when another weave is pressed). This runs BEFORE the new cast tells the server anything, so the old cast's
+	-- release / clear can never land on top of the new one.
+	local InputEndedConnection, DeathConnection, StatusEffectConnection, SourceDepletionConnection
+	if activeCast then
+		local previous = activeCast
+		activeCast = nil
+		previous()
 	end
 
 	-- Start Charging which may be useful for weaves that requires charging
@@ -187,8 +223,11 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 	AnimationHandler.PlayWeaveAnimation(Character, WeaveName, "Channel", true)
 
 	-- Play the Channeling animation which is a loop that comes after Channel
-	AnimationHandler.PlayWeaveAnimation(Character, WeaveName, "Channeling", false)
-	
+	-- (ScriptedAnimations weaves, like Stilling, start it themselves at the right moment)
+	if not WeaveData.ScriptedAnimations then
+		AnimationHandler.PlayWeaveAnimation(Character, WeaveName, "Channeling", false)
+	end
+
 	local pressedAt = os.clock()
 
 	-- Cleanup function
@@ -196,16 +235,17 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 	local function CleanUp()
 		if WeaveName == nil or cleaned then return end -- SourceDepleted, a status effect and the key release can all land together
 		cleaned = true
-		
+		if activeCast == CleanUp then activeCast = nil end
+
 		if WeaveData.RequiresReady and os.clock() - pressedAt < WeaveData.ReadyTime then
 			GuiRelatedThings.ErrorMessage(Player, `{WeaveName} wasn't ready yet`)
 		end
-		
+
 		-- Find Target 
 		local MouseTarget
 		MousePos = Mouse.Hit.Position
 		if WeaveData.RequiresTarget then MouseTarget = Utilities.findCharacter(Mouse.Target, CastRange, Player) end
-		
+
 		-- If Sourced is a connection, store it for later disconnection
 		if Sourced and typeof(Sourced) == "RBXScriptConnection" then
 			Sourced:Disconnect()
@@ -214,22 +254,25 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 
 		-- Clear the effects
 		WeavingFxClear:FireServer(WeaveName)
-	
+
 		-- Release the weave by signaling the server, send the WeaveName and the Charge amount
 		WeavingEvent:FireServer(WeaveName, Humanoid:GetAttribute("Charge"), MouseTarget, MousePos, Level.Value)
-		
+
 		-- Releases instant weaves, basically a clean up 
 		WeavingInstantReleaseEvent:FireServer(WeaveName)
 
 		-- Stops Charging and sets Charge back to 0
 		ChargeEvent:FireServer(false)
-		
+
 		-- Stop the Channeling
 		AnimationHandler.StopWeaveAnimation(Character, WeaveName, "Channel")
 		AnimationHandler.StopWeaveAnimation(Character, WeaveName, "Channeling")
 		-- Play the cast animation of the weave
-		AnimationHandler.PlayWeaveAnimation(Character, WeaveName, "Cast", false)
-		
+		-- (ScriptedAnimations weaves play it only if the SERVER says the cast succeeded)
+		if not WeaveData.ScriptedAnimations then
+			AnimationHandler.PlayWeaveAnimation(Character, WeaveName, "Cast", false)
+		end
+
 		-- (movement is given back by the server when it sees the weave end: WeavingFxClear / WeavingEvent above)
 
 		-- Put Weave back to Cooldown
@@ -243,12 +286,14 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 		if SourceDepletionConnection then SourceDepletionConnection:Disconnect(); SourceDepletionConnection = nil end
 		if StatusEffectConnection then StatusEffectConnection:Disconnect(); StatusEffectConnection = nil end
 		if DeathConnection then DeathConnection:Disconnect(); DeathConnection = nil end
-		
+
 	end
+
+	activeCast = CleanUp
 
 	-- InputEnded connection
 	InputEndedConnection = UserInputService.InputEnded:Connect(function(input, gpe)
-		if input.KeyCode ~= Enum.KeyCode.E or gpe then return end
+		if input.KeyCode ~= castKey or gpe then return end
 		CleanUp()
 	end)
 
@@ -258,17 +303,17 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 			CleanUp()
 		end)
 	end
-	
+
 	-- Death Listener
 	DeathConnection = Humanoid.Died:Connect(function()
 		GuiRelatedThings.ErrorMessage(Player, `You died, canceling {WeaveName}`)
 		CleanUp()
 	end)
-	
+
 	-- Status Effect Listener
 	StatusEffectConnection = Character.AttributeChanged:Connect(function(attributeName)
 		if attributeName == "Frozen" or attributeName == "Shielded" or attributeName == "Rooted" or 
-			attributeName == "Stunned" or attributeName == "Ragdolled" then
+			attributeName == "Stunned" or attributeName == "Ragdolled" or attributeName == "Stilling" or attributeName == "Stilled" then
 			local attrValue = Character:GetAttribute(attributeName)
 			if attrValue == true or (typeof(attrValue) == "number" and attrValue > 0) then
 				GuiRelatedThings.ErrorMessage(Player, `Status effect {attributeName} detected, canceling weave`)
@@ -276,8 +321,15 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 			end
 		end
 	end)
-	
+
 	-- (the "can't cast while Frozen / Shielded / Stunned" check is at the top of this handler and on the server in WeavingModule.DeductSource)
+end
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+	if gpe then return end
+	if input.KeyCode == Enum.KeyCode.E or input.KeyCode == Enum.KeyCode.R then
+		BeginCast(input.KeyCode)
+	end
 end)
 
 
@@ -287,7 +339,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 	if input.KeyCode ~= Enum.KeyCode.F or gpe or CutDebounce then return end
 	CutDebounce = true
 	task.delay(2, function() CutDebounce = false end)
-	
+
 	-- Acquire the Name of the Weave
 	local InverseName = WeavingModule.StartInversing(Player, Animations)
 	if InverseName == nil then return warn("There is no inverse weave for this") end
@@ -295,24 +347,24 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 	-- PRIMARY CHECKERS
 	local WeaveData = Dictionary[InverseName]
 	if not WeaveData then return warn("No data found for the specified inverse name") end
-	
+
 	for _, parts in CollectionService:GetTagged("Locking") do
 		if parts:IsA("BasePart") and parts:GetAttribute("Locking") then
 			print(`part found: {parts:GetFullName()}`)
 			-- Calculate distance within 30 studs around player
 			local distance = (HumanoidRP.Position - parts.Position).Magnitude
-			
+
 			if distance <= 30 then
 				-- Using the InverseName, check the WeaveName attribute of the detected part, if name matches then proceed
 				if (parts:GetAttribute("WeaveName") or "") == InverseName then
-					
+
 					-- Check for character's LockedWeave attribute and match the name, if name matches then proceed
 					if (Character:GetAttribute("LockedWeave" .. InverseName)) then
-						
+
 						-- Fire InversingRemote for effects
 						-- Send the InverseKey as paramater (WeaveData.InverseKey) as well as the parts (As that is the trail of the incoming weave)
 						InversingRemote:FireServer(InverseName, WeaveData.InverseKey, parts.CFrame)
-						
+
 						-- Play the inversion animation of the weave
 						AnimationHandler.PlayAnimation(Character, "Inversion")
 					end

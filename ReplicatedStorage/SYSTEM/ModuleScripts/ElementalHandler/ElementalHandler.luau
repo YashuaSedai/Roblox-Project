@@ -8,6 +8,7 @@ local TweenService = game:GetService("TweenService")
 local Utilities = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("UTILITIES"))
 local Janitor = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("Janitor"))
 local GuiRelatedThings = require(ReplicatedStorage:WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("GUI"):WaitForChild("GuiRelatedThings"))
+local DrawHandler = require(script.Parent:WaitForChild("DrawHandler"))
 --=========================================== CORE REQUIREMENTS =========================================== 
 -- DIRECTORIES
 local ElementalMixing = ReplicatedStorage:WaitForChild("ElementalMixing")
@@ -38,11 +39,35 @@ ElementalHandler.ElementalKeyMap = {
 }
 
 -- EMPTY SLOT FINDER
+-- PREDICTED SLOTS. A slot's real value is an attribute the SERVER sets after it hears about the draw, so it reaches this client a
+-- round trip later. Two quick presses used to see the same slot as still empty (the second element landed on top of the first,
+-- or was lost), and every draw only appeared after the round trip. So a draw or a clear is remembered here the moment it is
+-- sent, and this is what the slot lookups read. A prediction is dropped once the attribute agrees with it, or after
+-- PREDICT_WINDOW seconds (the server said no: the real value wins again).
+local PREDICT_WINDOW = 0.75
+local predicted = {} -- [slotName] = { value, at, char }
+
+local function predictSlot(char: Model, slotName: string, value: string)
+	predicted[slotName] = { value = value, at = os.clock(), char = char }
+end
+
+local function readSlot(char: Model, slotName: string)
+	local p = predicted[slotName]
+	if p then
+		if p.char ~= char or os.clock() - p.at > PREDICT_WINDOW or char:GetAttribute(slotName) == p.value then
+			predicted[slotName] = nil
+		else
+			return p.value
+		end
+	end
+	return char:GetAttribute(slotName)
+end
+
 function ElementalHandler.SlotFinder(char: Model, totalSlots: number)
 	-- Iterate through all the slots (e.g., Slot1 to Slot5)
 	for i = 1, totalSlots do
 		local slotName = "Slot" .. i
-		local slotValue = char:GetAttribute(slotName)
+		local slotValue = readSlot(char, slotName)
 
 		-- Check if the slot has the default value
 		if slotValue == "Default" then
@@ -56,11 +81,12 @@ end
 function ElementalHandler.LastSlotDeleter(char: Model, totalSlots: number)
 	for i = totalSlots, 1, -1 do
 		local slotName = "Slot"..i
-		local slotValue = char:GetAttribute(slotName)
+		local slotValue = readSlot(char, slotName)
 
 		-- Check if the slot is not "Default"
 		if slotValue ~= "Default" then
 			Assign:FireServer(slotName, "Default")
+			predictSlot(char, slotName, "Default")
 			return slotName
 		end
 	end	
@@ -82,9 +108,9 @@ end
 function ElementalHandler.PlaySound(player: Player, slotValue: string, slotName: string)
 	if slotValue == nil then warn("Sound cannot be played. SlotValue:", slotValue, ", SlotName:", slotName) return end
 	if player == nil then wait("Player Not Found") return end
-	
+
 	local char: Model = player.Character 
-	
+
 	if not char then warn("Character Not Found", player.Name) return end
 
 	local humanoidRP: BasePart = char:WaitForChild("HumanoidRootPart")
@@ -104,7 +130,7 @@ function ElementalHandler.PlaySound(player: Player, slotValue: string, slotName:
 					local selectedSfx = randomSound:Clone()
 					selectedSfx.Parent = humanoidRP
 					selectedSfx:Play()
-					
+
 					local tempJanitor = Janitor.new()
 
 					tempJanitor:GiveChore(selectedSfx.Ended:Connect(function()
@@ -112,16 +138,16 @@ function ElementalHandler.PlaySound(player: Player, slotValue: string, slotName:
 						tempJanitor:Clean()
 					end))	
 				end
-			-- For Default
+				-- For Default
 			else
 				local SoundEffect = SfxFolder:FindFirstChild(slotName)
 				if SoundEffect and SoundEffect:IsA("Sound") then
 					local selectedSfx = SoundEffect:Clone()
 					selectedSfx.Parent = humanoidRP
 					selectedSfx:Play()
-					
+
 					local tempJanitor = Janitor.new()
-					
+
 					tempJanitor:GiveChore(selectedSfx.Ended:Connect(function()
 						selectedSfx:Destroy()
 						tempJanitor:Clean()
@@ -138,7 +164,7 @@ end
 function ElementalHandler.Cooldown(variable: boolean, timer: number)
 	task.wait(timer)
 	variable = not variable
-	
+
 	return variable	
 end
 
@@ -174,7 +200,7 @@ function ElementalHandler.IsWeaving(player: Player, gpe: boolean)
 	local char = player and player.Character
 
 	if ElementalHandler.IsWeavingDebounce[player.UserId] == true then GuiRelatedThings.ErrorMessage(player, "Your weaving is on cooldown") return end
-	
+
 	-- Setting Debounce to True
 	ElementalHandler.IsWeavingDebounce[player.UserId] = true
 
@@ -190,10 +216,10 @@ function ElementalHandler.IsWeaving(player: Player, gpe: boolean)
 
 		-- Setting Debounce to False
 		ElementalHandler.IsWeavingDebounce[player.UserId] =  ElementalHandler.Cooldown(ElementalHandler.IsWeavingDebounce[player.UserId], IS_WEAVING_DEBOUNCE_CD)
-		
+
 	elseif char:GetAttribute("IsWeaving") == true then
 		char:SetAttribute("IsWeaving", false)
-		
+
 		-- Toggle Visibility of the Slots
 		ElementalHandler.SlotsVisibilityToggle(player, char:GetAttribute("IsWeaving"))
 
@@ -210,41 +236,47 @@ end
 function ElementalHandler.MainHandler(player: Player, input: InputObject, gpe: boolean, animationTable)
 	if player == nil then return end
 	if gpe then return end
-	
+
 	if not animationTable then warn("Animations Table does not exist") return end
-	
+
 	-- Checks if the a the debounce exists for the player
 	if ElementalHandler.ElementalDebounce[player.UserId] == nil then
 		ElementalHandler.ElementalDebounce[player.UserId] = false
 	end
-	
+
 	local char = player and player.Character
-	
+
 	if char:GetAttribute("IsWeaving") == false or char:GetAttribute("IsWeaving") == nil then return end
-	
+
+	-- held by a Stilling, or already Stilled: no drawing elements
+	if char:GetAttribute("Stilling") or char:GetAttribute("Stilled") then return end
+
 	local element = ElementalHandler.ElementalKeyMap[input.KeyCode]
 	if element then
 		local emptySlot, slotNo = ElementalHandler.SlotFinder(char, 5)
 		if emptySlot then
 			Assign:FireServer(emptySlot, element)
 			DrawEvent:FireServer(element, emptySlot, slotNo)
+			-- show it NOW instead of waiting for the server to send it back (the server skips the sender)
+			predictSlot(char, emptySlot, element)
+			DrawHandler.SetupElementalFx(char, player.Name, element, emptySlot, slotNo)
 		end
-		
+
 		if emptySlot == "Slot1" then
 			animationTable.Default.Track:Play()
 		end
-		
+
 		if not slotNo then
 			ElementalHandler.Cooldown(ElementalHandler.ElementalDebounce, ELEMENTAL_DEBOUNCE_CD)
 			return
 		end
-		
+
 		local selectedAnim = (slotNo % 2 == 0) and "Draw1" or "Draw2"
 		local selectedTrack: AnimationTrack= animationTable[selectedAnim] and animationTable[selectedAnim].Track
 		if selectedTrack then
 			selectedTrack:Play()
 		end
-		
+
 		ElementalHandler.PlaySound(player, element, slotNo)
 	end
 end
@@ -253,21 +285,22 @@ end
 function ElementalHandler.DeleterHandler(player: Player, input: InputObject, gpe: boolean, animationTable)
 	if player == nil then return end
 	if gpe then return end
-	
+
 	if not animationTable then warn("Animations Table does not exist") return end
-	
+
 	local char: Model = player and player.Character
-	
+
 	local SlotName = ElementalHandler.LastSlotDeleter(char, 5)
 	if SlotName then
 		ElementalHandler.PlaySound(player, "Default", SlotName)
 		DrawEvent:FireServer("Default", SlotName, nil)
-		
+		DrawHandler.SetupElementalFx(char, player.Name, "Default", SlotName, nil) -- cleared on screen at once too
+
 		if SlotName == "Slot1" then
 			animationTable.Default.Track:Stop()
 		end
 	end
-	
+
 	ElementalHandler.Cooldown(ElementalHandler.ElementalDebounce, ELEMENTAL_DEBOUNCE_CD)
 end
 

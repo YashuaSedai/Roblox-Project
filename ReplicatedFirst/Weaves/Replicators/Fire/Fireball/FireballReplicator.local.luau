@@ -6,6 +6,7 @@
 -- The held fireball is still created by FireballEffect; at "Launch" we take it over and fly it.
 
 -- SERVICES
+local GroundUtils = require(game:GetService("ReplicatedStorage"):WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("UTILITIES"))
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -105,21 +106,9 @@ local function onRedirect(id, position, direction, speed, serverTime, lifetimeLe
 	flight.lifetime = lifetimeLeft
 end
 
--- IMPACT: the server decided where it exploded and who it hit; we only play the show
-local function onImpact(id, position, targets, duration, charge)
-	local flight = flights[id]
-	flights[id] = nil
-
-	local projectile, folder
-	if flight then
-		if flight.connection then flight.connection:Disconnect() end
-		projectile, folder = flight.projectile, flight.folder
-	else
-		folder = Instance.new("Folder")
-		folder.Name = "FireballProjectile"
-		folder.Parent = workspace
-	end
-
+-- the show itself. It runs inside a pcall (see onImpact): an error in here (a missing asset, a target that was just destroyed)
+-- must never stop the cleanup.
+local function playImpact(position, targets, duration, charge, projectile, folder, direction)
 	if projectile then
 		projectile:PivotTo(CFrame.new(position)) -- end exactly where the server says
 
@@ -177,27 +166,21 @@ local function onImpact(id, position, targets, duration, charge)
 		end
 	end
 
-	-- ground explosion: flying blocks + dust, scaled by charge
-	local filter = { workspace.Terrain }
-	local baseplate = workspace:FindFirstChild("Baseplate")
-	if baseplate then table.insert(filter, baseplate) end
-
-	local rayParams = RaycastParams.new()
-	rayParams.FilterDescendantsInstances = filter
-	rayParams.FilterType = Enum.RaycastFilterType.Include
-	local result = workspace:Raycast(position + Vector3.new(0, 5, 0), Vector3.new(0, -50, 0), rayParams)
+	-- impact explosion on whatever the fireball hit (ground OR wall): flying blocks + dust, scaled by charge
+	local result = GroundUtils.RaycastImpact(position, direction)
 
 	if result then
 		local hitPart = result.Instance
 		local hitPosition = result.Position
+		local normal = result.Normal
 
 		local bits = FireballAssets:FindFirstChild("Bits")
-		Effects.CreateExplosion(bits, hitPosition, 10 * charge, { Min = 0.5, Max = 0.75 }, 10 * charge, 4, hitPart.Material, hitPart.Color, 50)
+		Effects.CreateExplosion(bits, hitPosition + normal * 0.5, 10 * charge, { Min = 0.5, Max = 0.75 }, 10 * charge, 4, hitPart.Material, hitPart.Color, 50)
 
 		local container = FireballAssets:FindFirstChild("EffectContainer"):Clone()
 		container.Parent = folder
 		container.Anchored = true
-		container.CFrame = CFrame.new(hitPosition) * CFrame.new(0, 0.75, 0)
+		container.CFrame = GroundUtils.SurfaceCFrame(hitPosition, normal) * CFrame.new(0, 0.75, 0) -- stands on the surface it hit
 
 		local sizePercentage = (math.clamp(charge * 5, 0, 100) / 100) + 1
 		local attached = container.AttachedEffects
@@ -214,13 +197,36 @@ local function onImpact(id, position, targets, duration, charge)
 		attached.Light.Size = Effects.ScaleNumberSequence(lightSize, sizePercentage)
 		attached.Light:Emit(5)
 	end
+end
 
+-- IMPACT: the server decided where it exploded and who it hit; we only play the show
+local function onImpact(id, position, targets, duration, charge)
+	local flight = flights[id]
+	flights[id] = nil
+
+	local projectile, folder
+	if flight then
+		if flight.connection then flight.connection:Disconnect() end
+		projectile, folder = flight.projectile, flight.folder
+	else
+		folder = Instance.new("Folder")
+		folder.Name = "FireballProjectile"
+		folder.Parent = workspace
+	end
+
+	-- CLEANUP IS SCHEDULED FIRST. It used to be the very last thing, so any error half way through the show skipped it and
+	-- left the fireball and its effects sitting in the workspace ("the VFX cleanup fails sometimes").
 	if projectile then
 		Debris:AddItem(projectile, duration)
 	end
 	task.delay(duration + 1, function()
 		if folder then folder:Destroy() end
 	end)
+
+	local ok, err = pcall(playImpact, position, targets, duration, charge, projectile, folder, flight and flight.direction)
+	if not ok then
+		warn("[Fireball] impact effect failed:", err)
+	end
 end
 
 -- FIZZLE: the cast was cancelled before launch (caster died or got ragdolled)

@@ -27,6 +27,7 @@ local ProjectileEvent = WeavingFolder:WaitForChild("ProjectileEvent")
 local AnimationSignal = Modules:WaitForChild("AnimationHandler"):WaitForChild("AnimationSignal")
 
 local WEAVE = "Boulder"
+local DamageService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("DamageService"))
 local KNOCKBACK_TIME = 1.75
 local HELD_OFFSET = CFrame.new(0, 15, 0) -- MUST match where BoulderEffect holds the boulder (humRP.CFrame * CFrame.new(0, 15, 0))
 local DEFAULT_CAST_DELAY = 0.35 -- seconds between release and launch; tune to your Cast animation, or set CastDelay in the Dictionary
@@ -137,9 +138,7 @@ local function explode(info, ctx)
 		local hum = model:FindFirstChildOfClass("Humanoid")
 
 		-- blast damage
-		hum:TakeDamage(ctx.damage)
-		hum:SetAttribute("LastAttacker", owner.UserId)
-		hum:SetAttribute("LastDamage", ctx.damage)
+		DamageService.Damage(hum, ctx.damage, owner, { Source = WEAVE })
 
 		-- ragdoll + knockback (knockback a frame later, once the ragdoll is in place)
 		RagdollService.Ragdoll(model, KNOCKBACK_TIME)

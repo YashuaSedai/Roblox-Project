@@ -50,10 +50,12 @@ local STATUS = {
 	Ragdolled   = { move = false, jump = false, cast = false },
 	Rooted      = { move = false, jump = false, cast = false },
 	Immobilized = { move = false, jump = false, cast = true },
+	Stilling    = { move = false, jump = false, cast = false }, -- being held up by a Stilling in progress
+	Stilled     = { move = true,  jump = true,  cast = false }, -- stripped of the Power: can walk (slowly), can't cast
 }
 
 -- the "Cast" source is cleared when ANY of these land (the same list the client listens to)
-local CANCELS_CAST = { "Frozen", "Shielded", "Stunned", "Ragdolled", "Rooted" }
+local CANCELS_CAST = { "Frozen", "Shielded", "Stunned", "Ragdolled", "Rooted", "Stilling", "Stilled" }
 
 -- the lock presets a source can use
 MovementService.Locks = {

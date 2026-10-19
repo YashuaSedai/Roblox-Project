@@ -467,4 +467,17 @@ function VFX.ScaleNumberSequence(originalKeypoints, multiplier)
 	return NumberSequence.new(newKeypoints)
 end
 
+-- @params: object, start, final, steps
+function VFX.SimulateFade(object, start, final, steps)
+	local interval = final/steps
+	local change = final - start
+	
+	for i = 1, steps do
+		object = start + (change * (i / steps))
+		task.wait(interval)
+	end
+	
+	object = final -- Ensure it reaches the exact target value
+end
+
 return VFX

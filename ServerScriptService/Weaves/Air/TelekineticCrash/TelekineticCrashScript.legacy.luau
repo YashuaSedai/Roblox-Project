@@ -35,6 +35,7 @@ local AnimationSignal = Modules:WaitForChild("AnimationHandler"):WaitForChild("A
 local Levitator = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Weaves"):WaitForChild("VFX"):WaitForChild("TelekineticCrash"):WaitForChild("Levitator")
 
 local WEAVE = "TelekineticCrash"
+local DamageService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("DamageService"))
 local DEFAULT_CAST_DELAY = 0.35 -- seconds between release and the strike; tune to your Cast animation, or set CastDelay in the Dictionary
 local DEFAULT_MAX_HOLD = 5      -- seconds a target can stay lifted if the caster never lets go; or set MaxHold in the Dictionary
 local KNOCKBACK_TIME = 1.75     -- same value the old client script used
@@ -249,9 +250,7 @@ WeavingInstantReleaseEvent.OnServerEvent:Connect(function(player: Player, weaveN
 		if not c or c ~= char or (RagdollService.IsRagdolled(c) or not MovementService.CanCast(c)) then return end -- caster died or got ragdolled first
 		if not tHum or tHum.Health <= 0 then return end
 
-		tHum:TakeDamage(session.damage)
-		tHum:SetAttribute("LastAttacker", player.UserId)
-		tHum:SetAttribute("LastDamage", session.damage)
+		DamageService.Damage(tHum, session.damage, player, { Source = WEAVE })
 
 		if tHum.Health > 0 then
 			RagdollService.Ragdoll(target, KNOCKBACK_TIME)

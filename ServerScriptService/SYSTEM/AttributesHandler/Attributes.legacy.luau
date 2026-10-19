@@ -88,6 +88,10 @@ Players.PlayerAdded:Connect(function(plr)
 			if not char:GetAttribute("Rendered") then
 				char:SetAttribute("Rendered", false)
 			end
+			
+			if not char:GetAttribute("Link") then
+				char:SetAttribute("Link", 0)
+			end
 		end
 		
 	end)

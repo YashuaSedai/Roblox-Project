@@ -10,23 +10,23 @@ local Utilities = {}
 
 -- Finds the humanoid's parent within the specified range
 function Utilities.findCharacter(targetPart, detectionRange, player)
-    local parent = targetPart
-    while parent do
-        if parent:FindFirstChild("Humanoid") then
-            local distance = (parent.PrimaryPart.Position - player.Character.HumanoidRootPart.Position).magnitude
-            if distance <= detectionRange then
-                return parent
+	local parent = targetPart
+	while parent do
+		if parent:FindFirstChild("Humanoid") then
+			local distance = (parent.PrimaryPart.Position - player.Character.HumanoidRootPart.Position).magnitude
+			if distance <= detectionRange then
+				return parent
 			else
 				task.spawn(function()
 					GuiRelatedThings.ErrorMessage(player, "Target is out of Range")
 				end)
-                
-                return nil
-            end
-        end
-        parent = parent.Parent
-    end
-    return nil
+
+				return nil
+			end
+		end
+		parent = parent.Parent
+	end
+	return nil
 end
 
 
@@ -436,6 +436,60 @@ function Utilities.GetDifferentFromDirectory(directory, excludedSounds)
 	end
 
 	return candidates[math.random(#candidates)]
+end
+
+-- ONE FILTERED RAYCAST that works on any map (terrain, a baseplate, parts, parts in folders...). It ignores water, the camera,
+-- anything that can't be collided with (most VFX parts) and every character (players and NPCs).
+local function filteredCast(origin: Vector3, direction: Vector3): RaycastResult?
+	local ignore = { workspace.CurrentCamera }
+	for _, player in game:GetService("Players"):GetPlayers() do
+		if player.Character then table.insert(ignore, player.Character) end
+	end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.IgnoreWater = true
+	params.RespectCanCollide = true
+	params.FilterDescendantsInstances = ignore
+
+	for _ = 1, 8 do -- an NPC in the way is added to the ignore list and the cast is repeated
+		local result = workspace:Raycast(origin, direction, params)
+		if not result then return nil end
+		local model = result.Instance:FindFirstAncestorOfClass("Model")
+		if model and model:FindFirstChildOfClass("Humanoid") then
+			table.insert(ignore, model)
+			params.FilterDescendantsInstances = ignore
+		else
+			return result
+		end
+	end
+	return nil
+end
+
+-- STRAIGHT DOWN onto the ground. Returns a RaycastResult (it has .Position, .Normal, .Instance) or nil.
+function Utilities.RaycastGround(origin: Vector3, distance: number?): RaycastResult?
+	return filteredCast(origin, Vector3.new(0, -(distance or 50), 0))
+end
+
+-- WHERE DID A PROJECTILE REALLY HIT? `position` is where the server says it stopped and `direction` is the way it was flying.
+-- The cast runs ALONG THAT LINE (from a little behind the spot to a little past it), so a wall is found just like the ground.
+-- With no direction, or when nothing is on the line (it ran out of range in mid-air), it falls back to straight down.
+function Utilities.RaycastImpact(position: Vector3, direction: Vector3?): RaycastResult?
+	if direction and direction.Magnitude > 0.001 then
+		local unit = direction.Unit
+		local result = filteredCast(position - unit * 4, unit * 8)
+		if result then return result end
+	end
+	return Utilities.RaycastGround(position + Vector3.new(0, 5, 0), 55)
+end
+
+-- A CFrame at `position` whose UP direction is `normal`, so an effect built "standing on the ground" stands on a wall (or hangs
+-- from a ceiling) the same way. On flat ground it is just CFrame.new(position).
+function Utilities.SurfaceCFrame(position: Vector3, normal: Vector3): CFrame
+	if math.abs(normal.Y) > 0.99 then
+		return CFrame.new(position) * (if normal.Y < 0 then CFrame.Angles(math.pi, 0, 0) else CFrame.identity)
+	end
+	return CFrame.lookAt(position, position + normal) * CFrame.Angles(math.rad(-90), 0, 0)
 end
 
 return Utilities

@@ -369,7 +369,8 @@ function WeavingModule.DeductSource(player: Player, hum: Humanoid, amount: numbe
 	-- Every weave pays through here, so every weave counts, including channeled ones that pay every 0.1s.
 	local burn = hum:FindFirstChild("Burn")
 	local perSource = burn and burn:GetAttribute("PerSource")
-	if perSource then
+	-- LINKED weavers (leader and linkers alike) don't gain Burn
+	if perSource and hum.Parent:GetAttribute("Linked") ~= true then
 		burn.Value += amount * perSource
 	end
 

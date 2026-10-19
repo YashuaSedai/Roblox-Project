@@ -27,6 +27,7 @@ local ProjectileEvent = WeavingFolder:WaitForChild("ProjectileEvent")
 local AnimationSignal = Modules:WaitForChild("AnimationHandler"):WaitForChild("AnimationSignal")
 
 local WEAVE = "AirPulse"
+local DamageService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("DamageService"))
 local KNOCKBACK_TIME = 1.75
 local DEFAULT_CAST_DELAY = 0.35 -- seconds between release and launch; tune to your Cast animation, or set CastDelay in the Dictionary
 local DEFAULT_MAX_HOLD = 30 -- seconds a charging weave can be held before it collapses; or set MaxHold in the Dictionary
@@ -226,9 +227,7 @@ WeavingEvent.OnServerEvent:Connect(function(player: Player, weaveName, _charge, 
 				local targetHum = model and model:FindFirstChildOfClass("Humanoid")
 
 				if targetHum and targetHum.Health > 0 and model ~= c then
-					targetHum:TakeDamage(damage)
-					targetHum:SetAttribute("LastAttacker", info.owner.UserId)
-					targetHum:SetAttribute("LastDamage", damage)
+					DamageService.Damage(targetHum, damage, info.owner, { Source = WEAVE })
 
 					RagdollService.Ragdoll(model, KNOCKBACK_TIME)
 					local ownerRoot = info.owner.Character and info.owner.Character:FindFirstChild("HumanoidRootPart")

@@ -53,6 +53,7 @@ local function makeParams(owner)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.RespectCanCollide = true
+	params.IgnoreWater = true -- terrain water used to stop projectiles like a wall
 	local char = getCharacter(owner)
 	params.FilterDescendantsInstances = char and { char } or {}
 	return params

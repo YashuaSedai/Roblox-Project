@@ -204,7 +204,7 @@ local function startRotator(cast, humRP, hand)
 		angle += ROTATOR_SPIN * dt
 
 		if arrived then
-			cast.rotator.CFrame = hand.CFrame * CFrame.Angles(0, 0, angle) -- stuck to the hand
+			cast.rotator.CFrame = hand.CFrame * CFrame.Angles(0, angle, 0) -- stuck to the hand
 		else
 			cast.rotator.CFrame = CFrame.new(cast.rotator.Position) * CFrame.Angles(0, angle, 0) -- still travelling
 		end

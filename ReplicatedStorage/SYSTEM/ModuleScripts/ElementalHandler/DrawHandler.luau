@@ -2,6 +2,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 -- GENERIC
 local ElementalMixing = ReplicatedStorage:WaitForChild("ElementalMixing")
@@ -26,18 +27,37 @@ local Trails = ElementalFolder:WaitForChild("Trails")
 local DrawHandler = {}
 DrawHandler.PlayerFx = {}
 
+-- HELPER FUNCTION
+local disconnectSlot -- (was an accidental global)
+do
+	function disconnectSlot(slotData)
+		if not slotData.Connection then
+			slotData.Connection = {} -- never leave it nil
+			return
+		end
+		for key, connection in slotData.Connection do
+			connection:Disconnect()
+			slotData.Connection[key] = nil -- empty the table, don't delete it
+		end
+	end
+end
+
 -- SETUPS PLAYER FX FOLDER
 function DrawHandler.SetUpPlayerFxFolder (name: string)
+	
+	local slots = {}
+	for i = 1, 5 do slots["Slot" .. i] = { Connection = {} } end
+	DrawHandler.PlayerFx[name] = { Slots = slots }
 
-	DrawHandler.PlayerFx[name] = {
-		Slots = {
-			Slot1 = {},
-			Slot2 = {},
-			Slot3 = {},
-			Slot4 = {},
-			Slot5 = {}
-		}
-	}
+	--DrawHandler.PlayerFx[name] = {
+	--	Slots = {
+	--		Slot1 = {},
+	--		Slot2 = {},
+	--		Slot3 = {},
+	--		Slot4 = {},
+	--		Slot5 = {}
+	--	}
+	--}
 end
 
 -- CLEARS ALL THE ELEMENTAL FX FROM THE PLAYER FX FOLDER
@@ -49,6 +69,7 @@ function DrawHandler.ClearElementalFx(name: string)
 			local Slotname = "Slot"..i
 			local Slot = DrawHandler.PlayerFx[name].Slots[Slotname]
 			if Slot then
+				Slot.Element = nil
 				if DrawHandler.PlayerFx[name].Slots[Slotname].newParticle then
 					for _, emitters in pairs (DrawHandler.PlayerFx[name].Slots[Slotname].newParticle:GetDescendants()) do
 						if emitters:IsA("ParticleEmitter") then
@@ -74,6 +95,19 @@ function DrawHandler.ClearElementalFx(name: string)
 						DrawHandler.PlayerFx[name].Slots[Slotname].newTrail = nil
 					end)
 				end
+				
+				if DrawHandler.PlayerFx[name].Slots[Slotname].newTrail2 then
+					for _, trails in pairs (DrawHandler.PlayerFx[name].Slots[Slotname].newTrail2:GetDescendants()) do
+						if trails:IsA("Trail") then
+							trails.Enabled = false
+						end
+					end
+					DrawHandler.PlayerFx[name].Slots[Slotname].TempTask3 = task.delay(2,function()
+						if not DrawHandler.PlayerFx[name].Slots[Slotname].newTrail2 then return end
+						DrawHandler.PlayerFx[name].Slots[Slotname].newTrail2:Destroy()
+						DrawHandler.PlayerFx[name].Slots[Slotname].newTrail2 = nil
+					end)
+				end
 
 				for taskIndex = 1, 4 do
 					local taskKey = "Task" .. taskIndex
@@ -82,11 +116,13 @@ function DrawHandler.ClearElementalFx(name: string)
 						DrawHandler.PlayerFx[name].Slots[Slotname][taskKey] = nil
 					end
 				end
+				
+				disconnectSlot(DrawHandler.PlayerFx[name].Slots[Slotname])
 
-				if DrawHandler.PlayerFx[name].Slots[Slotname].Connection then
-					DrawHandler.PlayerFx[name].Slots[Slotname].Connection:Disconnect()
-					DrawHandler.PlayerFx[name].Slots[Slotname].Connection = nil
-				end
+				--if DrawHandler.PlayerFx[name].Slots[Slotname].Connection then
+				--	DrawHandler.PlayerFx[name].Slots[Slotname].Connection:Disconnect()
+				--	DrawHandler.PlayerFx[name].Slots[Slotname].Connection = nil
+				--end
 
 				if DrawHandler.PlayerFx[name].Slots[Slotname].NewBezier then
 					DrawHandler.PlayerFx[name].Slots[Slotname].NewBezier = nil
@@ -104,6 +140,7 @@ function DrawHandler.InstantlyCleanElementalFx(name: string, userId:number, slot
 
 	local Slot = DrawHandler.PlayerFx[name].Slots[slot]
 	if Slot then
+		Slot.Element = nil -- "what is drawn in this slot", read by the reconciler in Draw.local
 
 		if DrawHandler.PlayerFx[name].Slots[slot].newParticle then
 			DrawHandler.PlayerFx[name].Slots[slot].newParticle:Destroy()
@@ -114,6 +151,11 @@ function DrawHandler.InstantlyCleanElementalFx(name: string, userId:number, slot
 			DrawHandler.PlayerFx[name].Slots[slot].newTrail:Destroy()
 			DrawHandler.PlayerFx[name].Slots[slot].newTrail = nil
 		end
+		
+		if DrawHandler.PlayerFx[name].Slots[slot].newTrail2 then
+			DrawHandler.PlayerFx[name].Slots[slot].newTrail2:Destroy()
+			DrawHandler.PlayerFx[name].Slots[slot].newTrail2 = nil
+		end
 
 		for taskIndex = 1, 4 do
 			local taskKey = "Task" .. taskIndex
@@ -122,11 +164,13 @@ function DrawHandler.InstantlyCleanElementalFx(name: string, userId:number, slot
 				DrawHandler.PlayerFx[name].Slots[slot][taskKey] = nil
 			end
 		end
+		
+		disconnectSlot(DrawHandler.PlayerFx[name].Slots[slot])
 
-		if DrawHandler.PlayerFx[name].Slots[slot].Connection then
-			DrawHandler.PlayerFx[name].Slots[slot].Connection:Disconnect()
-			DrawHandler.PlayerFx[name].Slots[slot].Connection = nil
-		end
+		--if DrawHandler.PlayerFx[name].Slots[slot].Connection then
+		--	DrawHandler.PlayerFx[name].Slots[slot].Connection:Disconnect()
+		--	DrawHandler.PlayerFx[name].Slots[slot].Connection = nil
+		--end
 		
 		if DrawHandler.PlayerFx[name].Slots[slot].TempTask1 then
 			task.cancel(DrawHandler.PlayerFx[name].Slots[slot].TempTask1)
@@ -151,6 +195,7 @@ function DrawHandler.RemoveElementalFx(name: string, userId:number, slot)
 
 	local Slot = DrawHandler.PlayerFx[name].Slots[slot]
 	if Slot then
+		Slot.Element = nil -- "what is drawn in this slot", read by the reconciler in Draw.local
 
 		if DrawHandler.PlayerFx[name].Slots[slot].newParticle then
 			for _, emitters in pairs (DrawHandler.PlayerFx[name].Slots[slot].newParticle:GetDescendants()) do
@@ -158,10 +203,25 @@ function DrawHandler.RemoveElementalFx(name: string, userId:number, slot)
 					emitters.Enabled = false
 				end
 			end
-			task.delay(2,function()
-				DrawHandler.PlayerFx[name].Slots[slot].newParticle:Destroy()
-				DrawHandler.PlayerFx[name].Slots[slot].newParticle = nil
-			end)
+			
+			--task.delay(2, function()
+				--DrawHandler.PlayerFx[name].Slots[slot].newParticle:Destroy()
+				--DrawHandler.PlayerFx[name].Slots[slot].newParticle = nil
+			--end)
+				
+				
+			local slotData = DrawHandler.PlayerFx[name].Slots[slot]
+
+			local particle = slotData.newParticle
+			if particle then
+				for _, emitters in particle:GetDescendants() do
+					if emitters:IsA("ParticleEmitter") then emitters.Enabled = false end
+				end
+				slotData.newParticle = nil
+				task.delay(2, function() particle:Destroy() end)
+			end
+				
+				
 		end
 
 		if DrawHandler.PlayerFx[name].Slots[slot].newTrail then
@@ -170,10 +230,44 @@ function DrawHandler.RemoveElementalFx(name: string, userId:number, slot)
 					trails.Enabled = false
 				end
 			end
-			task.delay(2,function()
-				DrawHandler.PlayerFx[name].Slots[slot].newTrail:Destroy()
-				DrawHandler.PlayerFx[name].Slots[slot].newTrail = nil
-			end)
+			--task.delay(2, function()
+				--DrawHandler.PlayerFx[name].Slots[slot].newTrail:Destroy()
+				--DrawHandler.PlayerFx[name].Slots[slot].newTrail = nil
+			--end)
+				
+				local slotData = DrawHandler.PlayerFx[name].Slots[slot]
+
+				local trail = slotData.newTrail
+				if trail then
+					for _, emitters in trail:GetDescendants() do
+						if emitters:IsA("ParticleEmitter") then emitters.Enabled = false end
+					end
+					slotData.newTrail = nil
+					task.delay(2, function() trail:Destroy() end)
+				end
+		end
+		
+		if DrawHandler.PlayerFx[name].Slots[slot].newTrail2 then
+			for _, trails in pairs (DrawHandler.PlayerFx[name].Slots[slot].newTrail2:GetDescendants()) do
+				if trails:IsA("Trail") then
+					trails.Enabled = false
+				end
+			end
+			--task.delay(2,function()
+			--	DrawHandler.PlayerFx[name].Slots[slot].newTrail2:Destroy()
+			--	DrawHandler.PlayerFx[name].Slots[slot].newTrail2 = nil
+			--end)
+			
+			local slotData = DrawHandler.PlayerFx[name].Slots[slot]
+
+			local trail = slotData.newTrail2
+			if trail then
+				for _, emitters in trail:GetDescendants() do
+					if emitters:IsA("ParticleEmitter") then emitters.Enabled = false end
+				end
+				slotData.newTrail = nil
+				task.delay(2, function() trail:Destroy() end)
+			end
 		end
 
 		for taskIndex = 1, 4 do
@@ -184,10 +278,12 @@ function DrawHandler.RemoveElementalFx(name: string, userId:number, slot)
 			end
 		end
 
-		if DrawHandler.PlayerFx[name].Slots[slot].Connection then
-			DrawHandler.PlayerFx[name].Slots[slot].Connection:Disconnect()
-			DrawHandler.PlayerFx[name].Slots[slot].Connection = nil
-		end
+		disconnectSlot(DrawHandler.PlayerFx[name].Slots[slot])
+		
+		--if DrawHandler.PlayerFx[name].Slots[slot].Connection then
+		--	DrawHandler.PlayerFx[name].Slots[slot].Connection:Disconnect()
+		--	DrawHandler.PlayerFx[name].Slots[slot].Connection = nil
+		--end
 
 		if DrawHandler.PlayerFx[name].Slots[slot].NewBezier then
 			DrawHandler.PlayerFx[name].Slots[slot].NewBezier = nil
@@ -360,7 +456,7 @@ function DrawHandler.SetupElementalFx (char: Model, name: string, element: strin
 		end
 	end)
 
-	SelectedSlot.Connection = tween.Completed:Connect(function()
+	SelectedSlot.Connection.Tween1 = tween.Completed:Connect(function()
 		SelectedSlot.Task3 = task.delay(2, function()
 			DrawHandler.NumberValueTween(newTrail, "Trail", 0.5, 2, 1, 20)
 
@@ -374,11 +470,53 @@ function DrawHandler.SetupElementalFx (char: Model, name: string, element: strin
 			end
 		end
 	end)
+	
+	-- 10/15/26 ADDITIONAL VFX TO THE CASTER
+	local rng = Random.new()
+
+	local function randomAxis(): Vector3
+		local a = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(-1, 1), rng:NextNumber(-1, 1))
+		return a.Magnitude > 0.1 and a.Unit or Vector3.yAxis
+	end
+
+	-- Orbits trailPart around the torso, forever, and follows it. Returns the connection (Disconnect it to stop).
+	local function startOrbit(torso: BasePart, trailPart: BasePart, clockwise: boolean)
+		local radius = rng:NextNumber(1, 5)
+		local spin = (clockwise and 1 or -1) * rng:NextNumber(2, 4) -- radians per second
+		local phase = rng:NextNumber(0, math.pi * 2)
+		local axis, targetAxis = randomAxis(), randomAxis()
+		local retargetAt = os.clock() + rng:NextNumber(1, 2)
+		local rot = CFrame.new() -- the accumulated rotation
+
+		return RunService.RenderStepped:Connect(function(dt)
+			if not torso.Parent then return end
+
+			-- every 1-2 seconds pick a new axis, and ease towards it
+			if os.clock() >= retargetAt then
+				targetAxis = randomAxis()
+				retargetAt = os.clock() + rng:NextNumber(1, 2)
+			end
+			axis = axis:Lerp(targetAxis, math.min(dt * 1.5, 1))
+			axis = axis.Magnitude > 0.05 and axis.Unit or targetAxis
+
+			rot = CFrame.fromAxisAngle(axis, spin * dt) * rot
+
+			local r = radius + math.sin(os.clock() * 1.3 + phase) -- the orbit "breathes" +-1 stud
+			local center = torso.Position + Vector3.new(0, 1, 0)
+			trailPart.Position = center + rot:VectorToWorldSpace(Vector3.new(r, 0, 0))
+		end)
+	end
+	
+	local trail2 = Effects.CreateTrail2(element, workspace, false, nil, false, nil, HumanoidRP.CFrame)
+	SelectedSlot.newTrail2 = trail2
+	trail2.Anchored = true
+	SelectedSlot.Connection.Orbit = startOrbit(Uppertorso, trail2, SlotBoolean)
 
 	-- Reinstate the important Variables to the actual table
 	DrawHandler.PlayerFx[name].Slots[slot].newParticle = newParticle
 	DrawHandler.PlayerFx[name].Slots[slot].newTrail = newTrail
 	DrawHandler.PlayerFx[name].Slots[slot].newBezier = newBezier
+	DrawHandler.PlayerFx[name].Slots[slot].Element = element -- only set when the whole setup went through
 end
 
 return DrawHandler

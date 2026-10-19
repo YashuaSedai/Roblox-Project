@@ -22,6 +22,7 @@ local cooldownUntil = {}
 local castCounters = {}
 
 local WEAVE = "LightningStrike"
+local DamageService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("DamageService"))
 
 local DEFAULT_MAX_HOLD = 30 -- seconds a charging weave can be held before it collapses; or set MaxHold in the Dictionary
 
@@ -105,15 +106,25 @@ WeavingEvent.OnServerEvent:Connect(function(player: Player, weaveName, _charge, 
 
 	-- the server picks who gets hit, after the wind-up
 	task.delay(0.25, function()
-		for _, model in workspace:GetChildren() do
-			local targetHum = model:IsA("Model") and model ~= char and model:FindFirstChildOfClass("Humanoid")
-			local targetRoot = targetHum and model:FindFirstChild("HumanoidRootPart")
-			if targetRoot and targetHum.Health > 0 and (targetRoot.Position - mousePos).Magnitude <= area then
-				targetHum:TakeDamage(damage)
-				targetHum:SetAttribute("LastAttacker", player.UserId)
-				targetHum:SetAttribute("LastDamage", damage)
-				if weaveData.RagdollDuration then
-					RagdollService.Ragdoll(model, weaveData.RagdollDuration)
+		-- everybody inside the area, wherever they sit in the workspace (an NPC inside a map folder counts)
+		local overlap = OverlapParams.new()
+		overlap.FilterType = Enum.RaycastFilterType.Exclude
+		overlap.FilterDescendantsInstances = { char }
+		local seen = {}
+		for _, part in workspace:GetPartBoundsInRadius(mousePos, area + 8, overlap) do
+			local model = part:FindFirstAncestorOfClass("Model")
+			while model and not model:FindFirstChildOfClass("Humanoid") do
+				model = model:FindFirstAncestorOfClass("Model") -- (armor or props can be models inside the character)
+			end
+			if model and not seen[model] then
+				seen[model] = true
+				local targetHum = model:FindFirstChildOfClass("Humanoid")
+				local targetRoot = model:FindFirstChild("HumanoidRootPart")
+				if targetRoot and targetHum.Health > 0 and (targetRoot.Position - mousePos).Magnitude <= area then
+					DamageService.Damage(targetHum, damage, player, { Source = WEAVE })
+					if weaveData.RagdollDuration then
+						RagdollService.Ragdoll(model, weaveData.RagdollDuration)
+					end
 				end
 			end
 		end

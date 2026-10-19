@@ -4,14 +4,19 @@
 --   1. E pressed ......... the cast opens (checks, first Source payment)                  -> CLIENT HOOK 1
 --   2. target locked ..... range / validity checked. The caster JOINS the target's shield (or starts it)
 --                          and their channel loop starts                                  -> CLIENT HOOK 2
+--                          From this moment the caster is already DRAINING the target's Source (see 4), shield or not.
 --   3. THE SHIELD TAKES HOLD the moment the target has LESS than 20% Source OR LESS than 20% Burn.
---                          Checked right at lock-on (so it can be immediate) and again every Interval.
+--                          Checked right at lock-on (so it can be immediate) and again every Interval, right after the drain.
 --                          The target is SHIELDED (can't move, can't draw, can't cast).
 --                          This happens once per shield.                                  -> CLIENT HOOK 3
 --   4. every Interval .... EVERY caster pays SourceCost.
---                          Once the shield holds, EVERY caster also drains SourceReduction from the target
---                          (once when it takes hold, then every Interval while it holds)
+--                          EVERY caster also drains Source from the target, continuously, from the moment they lock on
+--                          (the shield does NOT have to be holding yet), at ShieldBalance.drainPerSecond(casterLevel)
+--                          per second (scaled by real elapsed time). A target that out-regenerates the drain is never shielded.
 --                          (a caster's drain is skipped for 5s after THAT caster takes damage)
+--   4b. THE TARGET BREAKS FREE once it has recovered: Source is FULL and Burn is at or above weaveData.BurnMaximum.
+--                          Every caster is released at once (the same cooldown as a normal release).
+--   (LINKED weavers, leader or linker, are IMMUNE: they can't be targeted, and a shield on somebody who gets linked is cut.)
 --   5. each caster must KEEP HOLDING it. A caster who releases / is interrupted / runs out of Source /
 --      goes out of range / casts another weave just LEAVES the shield (END).
 --      The target stays shielded while at least ONE caster remains. When the last one leaves, the target is free.
@@ -38,6 +43,7 @@ local Dictionary = require(WeavingFolder:WaitForChild("Dictionary"))
 local DebuffHandler = require(Modules:WaitForChild("DebuffHandler"):WaitForChild("DebuffHandler"))
 local RagdollService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("RagdollService"))
 local MovementService = require(Modules:WaitForChild("MovementService"))
+local ShieldBalance = require(Modules:WaitForChild("ShieldBalance"))
 
 -- REMOTES
 local WeavingEvent = WeavingFolder:WaitForChild("WeavingEvent")
@@ -119,10 +125,31 @@ local function canShield(tHum, tSource, tMaxSource)
 	return false
 end
 
--- THIS caster takes SourceReduction from the target. Skipped while THIS caster's damage pause is running.
+-- the opposite of canShield: the target has fully recovered, so a held shield breaks.
+-- Source must be FULL and Burn must be at or above the Burn cutoff (a target with no Burn meter has nothing to wait for).
+local function hasRecovered(tHum, tSource, tMaxSource)
+	if tSource.Value < tMaxSource.Value then
+		return false
+	end
+	local burn = tHum:FindFirstChild("Burn")
+	if burn and burn.Value < Dictionary[WEAVE].BurnMaximum then
+		return false
+	end
+	return true
+end
+
+-- THIS caster drains Source from the target at ShieldBalance.drainPerSecond(session.level) per second, scaled by the real time
+-- since THIS caster's last drain call. The drain scales with the SHIELDER's level: a full-slot target needs to be
+-- LEVELS_AHEAD_TO_BEAT (5) levels above the shielder to out-regenerate it; fewer slots need many more levels.
+-- The clock starts when the caster locks on (session.lastDrainAt) and keeps running during the damage pause,
+-- so nothing is "owed" afterwards.
 local function drainTarget(session, tSource)
-	if os.clock() < session.pausedUntil then return end
-	tSource.Value = math.max(0, tSource.Value - Dictionary[WEAVE].SourceReduction)
+	local now = os.clock()
+	local last = session.lastDrainAt
+	session.lastDrainAt = now
+	if not last then return end
+	if now < session.pausedUntil then return end
+	tSource.Value = math.max(0, tSource.Value - ShieldBalance.drainPerSecond(session.level) * (now - last))
 end
 
 -- The lock on a shielded target is the "Shielded" attribute and nothing else. MovementService reacts to it (WalkSpeed 0,
@@ -186,15 +213,22 @@ local function succeed(shield, session, char, hum, humRP)
 	local target = shield.target
 
 	target:SetAttribute("Shielded", true) -- the existing status: Source regen stops, the target's own cast is cancelled,
-	                                      -- and MovementService locks their movement, jump and casting
-
-	-- the drain at the start of the shield (from the caster who triggered it)
-	local _, _, tSource = getTargetParts(target)
-	if tSource then drainTarget(session, tSource) end
+	-- and MovementService locks their movement, jump and casting
 
 	-- CLIENT HOOK 3: shield successful. The client plays ShieldedChannel + ShieldedChanneling on the target and its VFX.
 	-- The last argument is every caster who is shielding right now (characters), if your VFX wants to draw from each of them.
 	WeavingEvent:FireAllClients(char, hum, humRP, WEAVE, target, listCasterChars(shield))
+end
+
+-- THE TARGET BROKE FREE: every caster leaves the shield. finish() frees the target when the last one is gone.
+local function endShield(shield, cooldown)
+	local casters = {}
+	for player, session in shield.casters do -- copy first: finish() removes casters from shield.casters
+		table.insert(casters, { player = player, session = session })
+	end
+	for _, entry in casters do
+		finish(entry.player, entry.session, cooldown, true)
+	end
 end
 
 -- THE CHANNEL: one loop per caster
@@ -239,14 +273,24 @@ local function runChannel(player, session)
 				return finish(player, session, endCooldown, true)
 			end
 
-			if not shield.shielded then
-				-- not shielded yet: the moment the target is low enough on Source or Burn, the shield takes hold
-				if canShield(tHum, tSource, tMaxSource) then
-					succeed(shield, session, char, hum, humRP)
-				end
-			else
-				-- already shielded: every caster keeps draining
-				drainTarget(session, tSource)
+			-- the target got linked (leader or linker): linked weavers are immune, so the shield is cut
+			if target:GetAttribute("Linked") == true then
+				return endShield(shield, endCooldown)
+			end
+
+			-- a HELD shield breaks if the target has fully recovered (Source full, Burn past the cutoff)
+			if shield.shielded and hasRecovered(tHum, tSource, tMaxSource) then
+				return endShield(shield, endCooldown)
+			end
+
+			-- EVERY caster drains the target from lock-on, shield or not
+			drainTarget(session, tSource)
+
+			-- not shielded yet: the moment the target is low enough on Source or Burn, the shield takes hold.
+			-- (checked AFTER the drain on purpose: passive regen refills Source to exactly 20%, which is not "below 20%",
+			-- so the dip the drain just made is the only moment this can be seen)
+			if not shield.shielded and canShield(tHum, tSource, tMaxSource) then
+				succeed(shield, session, char, hum, humRP)
 			end
 		end
 	end)
@@ -285,6 +329,7 @@ WeavingFxEvent.OnServerEvent:Connect(function(player: Player, weaveName)
 		shield = nil,         -- the target's shield record this caster has joined (step 2)
 		targeted = false,
 		pausedUntil = 0,      -- THIS caster's drain is paused until this time (they took damage)
+		lastDrainAt = nil,    -- os.clock() of this caster's last drainTarget call (set when they lock on)
 		lastHealth = hum.Health,
 	}
 	sessions[player] = session
@@ -323,6 +368,13 @@ WeavingInstantEvent.OnServerEvent:Connect(function(player: Player, weaveName, mo
 		return finish(player, session, failCooldown, true)
 	end
 
+	if mouseTarget:GetAttribute("Linked") == true then
+		return finish(player, session, failCooldown, true) -- linked weavers are immune to shielding
+	end
+	if mouseTarget:GetAttribute("Stilled") == true then
+		return finish(player, session, failCooldown, true) -- Stilled weavers can't be shielded
+	end
+
 	local existing = shields[mouseTarget]
 	if not existing and mouseTarget:GetAttribute("Shielded") then
 		return finish(player, session, failCooldown, true) -- shielded by something that isn't this weave
@@ -339,6 +391,7 @@ WeavingInstantEvent.OnServerEvent:Connect(function(player: Player, weaveName, mo
 
 	-- join the target's shield (an existing one, or start it)
 	local shield = joinShield(player, session, mouseTarget)
+	session.lastDrainAt = os.clock() -- the drain starts now, whether or not the shield has taken hold yet
 
 	-- CLIENT HOOK 2: this caster is locked on the target. A beam / link between them can start here.
 	-- (fires once per caster, including casters who join a shield that is already holding)

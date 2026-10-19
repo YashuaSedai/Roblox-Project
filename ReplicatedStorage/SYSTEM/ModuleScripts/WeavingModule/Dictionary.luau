@@ -13,7 +13,7 @@ local Dictionary = {
 
 		-- COST + COOLDOWN
 		SourceCost = 10, -- SOURCE COST
-		DebounceDuration = 2.5, -- DB_DURATION
+		DebounceDuration = 0.5, -- DB_DURATION
 
 		-- CASTING
 		Instant = false,
@@ -42,7 +42,7 @@ local Dictionary = {
 		Image = Assets:WaitForChild("Frostbound").Image,
 
 		-- COST + COOLDOWN
-		SourceCost = 1.5,
+		SourceCost = 0.5,
 		DebounceDuration = 5, -- WEAVE COOLDOWN
 		FizzleCooldown = 1, -- cooldown after an early release
 
@@ -331,7 +331,7 @@ local Dictionary = {
 		Image = Assets:WaitForChild("TelekineticCrash").Image,
 
 		-- COST + COOLDOWN
-		SourceCost = 0.1,
+		SourceCost = 0.25,
 		DebounceDuration = 5,
 
 		-- CASTING
@@ -352,6 +352,74 @@ local Dictionary = {
 		-- EFFECT
 		SourceReduction = 0.5,
 		BurnMaximum = 20,
+	},
+
+	-- LINKING. Weaves that need links (cast with R instead of E) add two fields to their own entry:
+	--     RequiresLink = true,   -- cast with R; only the LEADER of a link can cast it; fails without enough links
+	--     LinksRequired = 3,     -- how many linkers the leader needs (default 1)
+	-- and their server script starts with:  if not LinkService.CanCast(player.Character, Dictionary[WEAVE]) then return end
+	Linking = {
+		-- IDENTITY
+		WeaveKey = "12345",
+		Image = Assets:WaitForChild("TelekineticCrash").Image,
+
+		-- COST + COOLDOWN
+		SourceCost = 0,
+		DebounceDuration = 2,
+
+		-- CASTING
+		Instant = true,
+		Charging = true,
+		MaxCharge = 0,
+		Interval = 0,
+		MaxHold = 600, -- how long a link can be held. MovementServer's failsafe ALSO reads this: without it the movement lock
+		-- was lifted after 35 seconds even though the link was still up
+
+		-- TARGETING
+		RequiresTarget = true,
+		RequiresPosition = false,
+		CastRange = 50,
+
+		-- MOVEMENT WHILE CASTING
+		Controls = false, -- the linker can't move while holding the link (MovementServer applies the lock from this)
+		SlowPercentage = 0, -- SHOULD BE 0 IF CONTROLS IS FALSE
+	},
+
+	-- STILLING (a link weave: cast with R by a leader with 7 linkers). See StillingScript for the whole sequence.
+	Stilling = {
+		-- IDENTITY
+		WeaveKey = "55555", -- PLACEHOLDER: change to the elements you want. It only has to be unique.
+		Image = Assets:WaitForChild("TelekineticCrash").Image, -- placeholder icon, like Linking / Shielding
+
+		-- COST + COOLDOWN
+		SourceCost = 0, -- no Source for now
+		DebounceDuration = 3, -- cooldown after a successful Stilling
+		FizzleCooldown = 5, -- cooldown after a failed one
+
+		-- CASTING
+		Instant = true,
+		Charging = false,
+		MaxCharge = 0,
+		Interval = 0,
+		MaxHold = 60, -- MovementServer's failsafe for the caster's cast lock (the weave's own timeouts end it sooner)
+		RequiresLink = true,
+		LinksRequired = 1,
+		ScriptedAnimations = true, -- ElementalSetting must NOT auto-play Channeling / Cast: StillingReplicator plays them at the right moments
+
+		-- TARGETING
+		RequiresTarget = true,
+		RequiresPosition = false,
+		CastRange = 50,
+		FixedRange = true, -- the cast range is exactly CastRange: the caster's Level is NOT added to it
+
+		-- MOVEMENT WHILE CASTING
+		Controls = false, -- the leader can't move while channeling
+		SlowPercentage = 0,
+
+		-- EFFECT
+		HoldTimeout = 20, -- seconds the caster may take to release after the last needle before the weave fizzles
+		StilledDuration = 20, -- seconds the target stays Stilled (5 minutes)
+		StilledSpeedMult = 0.6, -- a Stilled weaver walks at 60% speed
 	},
 }
 

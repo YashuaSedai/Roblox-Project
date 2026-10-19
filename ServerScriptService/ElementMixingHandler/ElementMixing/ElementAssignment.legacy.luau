@@ -10,6 +10,10 @@ Assign.OnServerEvent:Connect(function(plr, SlotName, Element)
 
 	local Character = plr.Character
 	if not Character then return end
+
+	-- held by a Stilling, or Stilled: they can't draw (clearing a slot is still allowed)
+	if Element ~= "Default" and (Character:GetAttribute("Stilling") or Character:GetAttribute("Stilled") or plr:GetAttribute("Stilled")) then return end
+
 	Character:SetAttribute(SlotName, Element)
 
 	local Head = Character:FindFirstChild("Head")

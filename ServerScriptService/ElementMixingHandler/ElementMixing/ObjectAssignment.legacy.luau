@@ -21,7 +21,10 @@ Weaver.OnServerEvent:Connect(function(player)
 				newSlot.Parent = Head
 				for _, gui in pairs(newSlot:GetChildren()) do
 					if gui:IsA("BillboardGui") then
-						gui.Adornee = Head 
+						gui.Adornee = Head
+						for _, frame in gui:GetChildren() do
+							if frame:IsA("Frame") then frame.Visible = true end -- the server does it, so every player sees every slot
+						end
 					end
 				end
 			end

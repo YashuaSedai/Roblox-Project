@@ -27,6 +27,7 @@ local ProjectileEvent = WeavingFolder:WaitForChild("ProjectileEvent")
 local AnimationSignal = Modules:WaitForChild("AnimationHandler"):WaitForChild("AnimationSignal")
 
 local WEAVE = "Fireball"
+local DamageService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("DamageService"))
 local KNOCKBACK_TIME = 1.75
 local DEFAULT_CAST_DELAY = 0.35 -- seconds between release and launch; tune to your Cast animation, or set CastDelay in the Dictionary
 local DEFAULT_MAX_HOLD = 30 -- seconds a charging weave can be held before it collapses; or set MaxHold in the Dictionary
@@ -119,9 +120,7 @@ local function explode(info, ctx)
 		local hum = model:FindFirstChildOfClass("Humanoid")
 
 		-- blast damage
-		hum:TakeDamage(ctx.damage)
-		hum:SetAttribute("LastAttacker", owner.UserId)
-		hum:SetAttribute("LastDamage", ctx.damage)
+		DamageService.Damage(hum, ctx.damage, owner, { Source = WEAVE })
 
 		-- burn
 		task.spawn(DebuffHandler.DoT, owner, owner.UserId, hum, ctx.dot, ctx.duration, 0.1)

@@ -27,6 +27,7 @@ local ProjectileEvent = WeavingFolder:WaitForChild("ProjectileEvent")
 local AnimationSignal = Modules:WaitForChild("AnimationHandler"):WaitForChild("AnimationSignal")
 
 local WEAVE = "Frostbound"
+local DamageService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("DamageService"))
 local DEFAULT_CAST_DELAY = 0.35 -- seconds between release and launch; tune to your Cast animation, or set CastDelay in the Dictionary
 local DEFAULT_MAX_HOLD = 30 -- seconds a charging weave can be held before it collapses; or set MaxHold in the Dictionary
 
@@ -116,9 +117,7 @@ local function explode(info, ctx)
 
 	for _, model in targets do
 		local hum = model:FindFirstChildOfClass("Humanoid")
-		hum:TakeDamage(ctx.damage)
-		hum:SetAttribute("LastAttacker", owner.UserId)
-		hum:SetAttribute("LastDamage", ctx.damage)
+		DamageService.Damage(hum, ctx.damage, owner, { Source = WEAVE })
 		if hum.Health > 0 then
 			DebuffHandler.Freeze(owner, model, ctx.duration)
 		end

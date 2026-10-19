@@ -6,6 +6,7 @@
 -- is still created by BoulderEffect; at "Launch" we take it over and fly it.
 
 -- SERVICES
+local GroundUtils = require(game:GetService("ReplicatedStorage"):WaitForChild("SYSTEM"):WaitForChild("ModuleScripts"):WaitForChild("UTILITIES"))
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -185,21 +186,14 @@ local function onImpact(id, position, _targets, _duration, charge)
 	end
 
 	-- ground burst: flying chunks plus dust, scaled by charge
-	local filter = { workspace.Terrain }
-	local baseplate = workspace:FindFirstChild("Baseplate")
-	if baseplate then table.insert(filter, baseplate) end
-
-	local rayParams = RaycastParams.new()
-	rayParams.FilterDescendantsInstances = filter
-	rayParams.FilterType = Enum.RaycastFilterType.Include
-	local result = workspace:Raycast(position + Vector3.new(0, 5, 0), Vector3.new(0, -50, 0), rayParams)
+	local result = GroundUtils.RaycastImpact(position, flight and flight.direction) -- ground OR wall
 
 	if result then
 		local hitPart = result.Instance
-		Effects.CreateExplosion(nil, result.Position, 10 * charge, { Min = 1, Max = 1.5 }, 7.5 * charge, 4, hitPart.Material, hitPart.Color)
+		Effects.CreateExplosion(nil, result.Position + result.Normal * 0.5, 10 * charge, { Min = 1, Max = 1.5 }, 7.5 * charge, 4, hitPart.Material, hitPart.Color)
 
 		if container then
-			container:PivotTo(CFrame.new(result.Position) * CFrame.new(0, 0.75, 0))
+			container:PivotTo(GroundUtils.SurfaceCFrame(result.Position, result.Normal) * CFrame.new(0, 0.75, 0))
 
 			local sizePercentage = (math.clamp(charge, 0, 100) / 100) + 2
 			local attached = container:FindFirstChild("AttachedEffects")

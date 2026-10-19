@@ -27,6 +27,7 @@ local ProjectileEvent = WeavingFolder:WaitForChild("ProjectileEvent")
 local AnimationSignal = Modules:WaitForChild("AnimationHandler"):WaitForChild("AnimationSignal")
 
 local WEAVE = "WindCutter"
+local DamageService = require(ServerScriptService:WaitForChild("SYSTEM"):WaitForChild("DamageService"))
 local DEFAULT_CAST_DELAY = 0.35 -- seconds between release and launch; tune to your Cast animation, or set CastDelay in the Dictionary
 
 -- STATE THE SERVER OWNS (clients can't touch these)
@@ -193,9 +194,7 @@ WeavingEvent.OnServerEvent:Connect(function(player: Player, weaveName, _charge, 
 			onHit = function(info)
 				local targetHum = info.model:FindFirstChildOfClass("Humanoid")
 				if not targetHum or targetHum.Health <= 0 then return end
-				targetHum:TakeDamage(damage)
-				targetHum:SetAttribute("LastAttacker", info.owner.UserId)
-				targetHum:SetAttribute("LastDamage", damage)
+				DamageService.Damage(targetHum, damage, info.owner, { Source = WEAVE })
 				ProjectileEvent:FireAllClients("Hit", info.id, WEAVE, info.position)
 			end,
 

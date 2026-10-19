@@ -21,11 +21,27 @@ DrawEvent.OnServerEvent:Connect(function(plr, element, slot, slotNo)
 	if typeof(slot) ~= "string" or not SLOTS[slot] then return end
 	if slotNo ~= nil and (typeof(slotNo) ~= "number" or slotNo % 1 ~= 0 or slotNo < 1 or slotNo > 5) then return end
 
-	local now = os.clock()
-	if now - (lastDraw[plr] or 0) < 0.05 then return end -- at most about 20 a second
-	lastDraw[plr] = now
+	local drawChar = plr.Character
+	if element ~= "Default" and drawChar and (drawChar:GetAttribute("Stilling") or drawChar:GetAttribute("Stilled")) then return end
 
-	DrawEvent:FireAllClients(plr.Character, plr.Name, element, slot, slotNo)
+	-- rate limit PER SLOT. It used to be one limit for the whole player: five slots drawn or cleared within 50ms (the weave
+	-- reset clears all of them at once) lost four of the five events, and those slots were left drawn / not drawn for good.
+	local now = os.clock()
+	local perSlot = lastDraw[plr]
+	if not perSlot then
+		perSlot = {}
+		lastDraw[plr] = perSlot
+	end
+	if now - (perSlot[slot] or 0) < 0.05 then return end -- the same slot at most about 20 times a second
+	perSlot[slot] = now
+
+	-- everybody EXCEPT the drawer: their own client already showed it the moment they pressed the key (prediction). If this
+	-- request was rejected above, the slot reconciler on their client repairs the visual from the real Slot attributes.
+	for _, other in Players:GetPlayers() do
+		if other ~= plr then
+			DrawEvent:FireClient(other, plr.Character, plr.Name, element, slot, slotNo)
+		end
+	end
 end)
 
 -- WHEN FX NEEDS CLEANING UP
@@ -44,9 +60,10 @@ SourceDeduct.OnServerEvent:Connect(function(player: Player, hum, amount)
 end)
 
 Players.PlayerRemoving:Connect(function(Player)
+	lastDraw[Player] = nil
 	local Name = Player.Name
 	RemoveEvent:FireAllClients(Name)
-	
+
 end)
 
 Players.PlayerAdded:Connect(function(Player)
@@ -55,12 +72,12 @@ Players.PlayerAdded:Connect(function(Player)
 			local tempJanitor = Janitor.new()
 			local Humanoid = char and char:WaitForChild("Humanoid")
 			local Name = Player.Name
-			
-				tempJanitor:GiveChore(Humanoid.Died:Connect(function()
+
+			tempJanitor:GiveChore(Humanoid.Died:Connect(function()
 				RemoveEvent:FireAllClients(Name)
 				tempJanitor:Clean()
-				end))
-			
+			end))
+
 		end
 	end)
 end)
